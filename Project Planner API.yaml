@@ -1,0 +1,731 @@
+openapi: 3.0.3
+info:
+  title: Project Planner API
+  version: 1.0.0
+  description: API documentation for Project Planner.
+paths:
+  /api/v1/users/login/:
+    post:
+      operationId: v1_users_login_create
+      description: Handles user login and returns JWT tokens
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserLogin'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UserLogin'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UserLogin'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: Login successful, returns tokens
+        '401':
+          description: Invalid credentials
+        '403':
+          description: Email not verified
+  /api/v1/users/logout/:
+    post:
+      operationId: v1_users_logout_create
+      description: Handles user logout by blacklisting the refresh token
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '205':
+          description: Logged out successfully
+        '400':
+          description: Invalid token
+  /api/v1/users/otp/send/:
+    post:
+      operationId: v1_users_otp_send_create
+      description: Handles OTP sending for various purposes like registration or password
+        reset
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpSend'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OtpSend'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OtpSend'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: OTP sent successfully
+        '400':
+          description: Invalid request data
+  /api/v1/users/otp/verify/:
+    post:
+      operationId: v1_users_otp_verify_create
+      description: Handles OTP verification for various purposes
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpVerification'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OtpVerification'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OtpVerification'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: OTP verified successfully, returns tokens
+        '400':
+          description: Invalid or expired OTP
+  /api/v1/users/password/change/:
+    post:
+      operationId: v1_users_password_change_create
+      description: An endpoint for changing the user password
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePassword'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ChangePassword'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChangePassword'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: Password updated successfully
+        '400':
+          description: Invalid password data
+  /api/v1/users/password/reset/:
+    post:
+      operationId: v1_users_password_reset_create
+      description: Handles password reset requests by sending OTP
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: Password reset OTP sent successfully
+        '404':
+          description: User not found
+  /api/v1/users/password/reset/confirm/:
+    post:
+      operationId: v1_users_password_reset_confirm_create
+      description: Handles password reset confirmation and token generation
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirm'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirm'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirm'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: Password reset successful, returns new tokens
+        '400':
+          description: Invalid reset data
+  /api/v1/users/profile/:
+    get:
+      operationId: v1_users_profile_retrieve
+      description: Handles user profile retrieval and updates
+      parameters:
+      - in: query
+        name: user_id
+        schema:
+          type: integer
+        description: Optional user ID to get specific profile
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+          description: ''
+        '403':
+          description: Permission denied
+        '404':
+          description: Profile not found
+    put:
+      operationId: v1_users_profile_update
+      description: Handles user profile retrieval and updates
+      parameters:
+      - in: query
+        name: user_id
+        schema:
+          type: integer
+        description: Optional user ID to get specific profile
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Profile'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Profile'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Profile'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+          description: ''
+        '403':
+          description: Permission denied
+        '404':
+          description: Profile not found
+    patch:
+      operationId: v1_users_profile_partial_update
+      description: Handles user profile retrieval and updates
+      parameters:
+      - in: query
+        name: user_id
+        schema:
+          type: integer
+        description: Optional user ID to get specific profile
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedProfile'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedProfile'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedProfile'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+          description: ''
+        '403':
+          description: Permission denied
+        '404':
+          description: Profile not found
+  /api/v1/users/profile/{user_id}/:
+    get:
+      operationId: v1_users_profile_retrieve_2
+      description: Handles user profile retrieval and updates
+      parameters:
+      - in: path
+        name: user_id
+        schema:
+          type: integer
+        required: true
+      - in: query
+        name: user_id
+        schema:
+          type: integer
+        description: Optional user ID to get specific profile
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+          description: ''
+        '403':
+          description: Permission denied
+        '404':
+          description: Profile not found
+    put:
+      operationId: v1_users_profile_update_2
+      description: Handles user profile retrieval and updates
+      parameters:
+      - in: path
+        name: user_id
+        schema:
+          type: integer
+        required: true
+      - in: query
+        name: user_id
+        schema:
+          type: integer
+        description: Optional user ID to get specific profile
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Profile'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Profile'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Profile'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+          description: ''
+        '403':
+          description: Permission denied
+        '404':
+          description: Profile not found
+    patch:
+      operationId: v1_users_profile_partial_update_2
+      description: Handles user profile retrieval and updates
+      parameters:
+      - in: path
+        name: user_id
+        schema:
+          type: integer
+        required: true
+      - in: query
+        name: user_id
+        schema:
+          type: integer
+        description: Optional user ID to get specific profile
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedProfile'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedProfile'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedProfile'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+          description: ''
+        '403':
+          description: Permission denied
+        '404':
+          description: Profile not found
+  /api/v1/users/register/:
+    post:
+      operationId: v1_users_register_create
+      description: Handles user registration and sends verification OTP
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRegistration'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UserRegistration'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UserRegistration'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '201':
+          description: Registration successful, OTP sent
+        '200':
+          description: User exists but email not verified, OTP resent
+        '400':
+          description: Invalid registration data
+  /api/v1/users/token/:
+    post:
+      operationId: v1_users_token_create
+      description: Custom token view that uses MyTokenObtainPairSerializer
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MyTokenObtainPair'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/MyTokenObtainPair'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/MyTokenObtainPair'
+        required: true
+      responses:
+        '200':
+          description: Returns access and refresh tokens
+  /api/v1/users/token/refresh/:
+    post:
+      operationId: v1_users_token_refresh_create
+      description: |-
+        Takes a refresh type JSON web token and returns an access type JSON web
+        token if the refresh token is valid.
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenRefresh'
+          description: ''
+components:
+  schemas:
+    ChangePassword:
+      type: object
+      description: Serializer for changing user password.
+      properties:
+        old_password:
+          type: string
+          writeOnly: true
+        new_password:
+          type: string
+          writeOnly: true
+        confirm_password:
+          type: string
+          writeOnly: true
+      required:
+      - confirm_password
+      - new_password
+      - old_password
+    MyTokenObtainPair:
+      type: object
+      description: Custom serializer to add additional claims in the JWT token.
+      properties:
+        username:
+          type: string
+          writeOnly: true
+        password:
+          type: string
+          writeOnly: true
+      required:
+      - password
+      - username
+    OtpSend:
+      type: object
+      description: Serializer to send OTP for various purposes.
+      properties:
+        email:
+          type: string
+          format: email
+        purpose:
+          $ref: '#/components/schemas/OtpSendPurposeEnum'
+      required:
+      - email
+      - purpose
+    OtpSendPurposeEnum:
+      enum:
+      - REGISTRATION
+      - EMAIL_CHANGE
+      - PASSWORD_RESET
+      type: string
+      description: |-
+        * `REGISTRATION` - REGISTRATION
+        * `EMAIL_CHANGE` - EMAIL_CHANGE
+        * `PASSWORD_RESET` - PASSWORD_RESET
+    OtpVerification:
+      type: object
+      description: Serializer to verify OTP.
+      properties:
+        email:
+          type: string
+          format: email
+        otp:
+          type: string
+        purpose:
+          $ref: '#/components/schemas/OtpVerificationPurposeEnum'
+      required:
+      - email
+      - otp
+      - purpose
+    OtpVerificationPurposeEnum:
+      enum:
+      - REGISTRATION
+      - EMAIL_CHANGE
+      - PASSWORD_RESET
+      - LOGIN
+      type: string
+      description: |-
+        * `REGISTRATION` - REGISTRATION
+        * `EMAIL_CHANGE` - EMAIL_CHANGE
+        * `PASSWORD_RESET` - PASSWORD_RESET
+        * `LOGIN` - LOGIN
+    PasswordResetConfirm:
+      type: object
+      description: Serializer to confirm password reset with a token.
+      properties:
+        reset_token:
+          type: string
+        new_password:
+          type: string
+          writeOnly: true
+          minLength: 8
+      required:
+      - new_password
+      - reset_token
+    PasswordResetRequest:
+      type: object
+      description: Serializer to request a password reset.
+      properties:
+        email:
+          type: string
+          format: email
+      required:
+      - email
+    PatchedProfile:
+      type: object
+      description: Serializer to handle user profile updates, including pending email
+        changes.
+      properties:
+        user:
+          allOf:
+          - $ref: '#/components/schemas/User'
+          readOnly: true
+        address:
+          type: string
+          nullable: true
+          maxLength: 255
+        city:
+          type: string
+          nullable: true
+          maxLength: 100
+        country:
+          type: string
+          nullable: true
+          maxLength: 100
+        date_of_birth:
+          type: string
+          format: date
+          nullable: true
+        profile_picture:
+          type: string
+          format: uri
+          nullable: true
+        phone_number:
+          type: string
+          nullable: true
+          maxLength: 15
+        pending_email:
+          type: string
+          format: email
+          writeOnly: true
+    Profile:
+      type: object
+      description: Serializer to handle user profile updates, including pending email
+        changes.
+      properties:
+        user:
+          allOf:
+          - $ref: '#/components/schemas/User'
+          readOnly: true
+        address:
+          type: string
+          nullable: true
+          maxLength: 255
+        city:
+          type: string
+          nullable: true
+          maxLength: 100
+        country:
+          type: string
+          nullable: true
+          maxLength: 100
+        date_of_birth:
+          type: string
+          format: date
+          nullable: true
+        profile_picture:
+          type: string
+          format: uri
+          nullable: true
+        phone_number:
+          type: string
+          nullable: true
+          maxLength: 15
+        pending_email:
+          type: string
+          format: email
+          writeOnly: true
+      required:
+      - user
+    RoleEnum:
+      enum:
+      - admin
+      - user
+      type: string
+      description: |-
+        * `admin` - Admin
+        * `user` - User
+    TokenRefresh:
+      type: object
+      properties:
+        access:
+          type: string
+          readOnly: true
+        refresh:
+          type: string
+          writeOnly: true
+      required:
+      - access
+      - refresh
+    User:
+      type: object
+      description: Serializer to display user details.
+      properties:
+        username:
+          type: string
+          description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
+            only.
+          pattern: ^[\w.@+-]+$
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        role:
+          $ref: '#/components/schemas/RoleEnum'
+        is_active:
+          type: boolean
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+      required:
+      - email
+      - username
+    UserLogin:
+      type: object
+      description: Serializer for user login.
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+      required:
+      - password
+      - username
+    UserRegistration:
+      type: object
+      description: Serializer for registering a new user with email verification.
+      properties:
+        username:
+          type: string
+          description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
+            only.
+          pattern: ^[\w.@+-]+$
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          writeOnly: true
+        password2:
+          type: string
+          writeOnly: true
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+      required:
+      - email
+      - password
+      - password2
+      - username
+  securitySchemes:
+    jwtAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

@@ -1,5 +1,7 @@
-one
+One
 *.pyc
 *__pycache__/
 */migrations/*
 !*/migrations/__init__.py
+.env
+db.sqlite3
