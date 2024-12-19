@@ -4,6 +4,284 @@ info:
   version: 1.0.0
   description: API documentation for Project Planner.
 paths:
+  /api/v1/projects/:
+    get:
+      operationId: v1_projects_list
+      description: Handle GET request to list projects.
+      parameters:
+      - in: query
+        name: members
+        schema:
+          type: string
+        description: Filter by members
+      - in: query
+        name: owner
+        schema:
+          type: string
+        description: Filter by owner
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Project'
+          description: ''
+    post:
+      operationId: v1_projects_create
+      description: Handle POST request to create a new project.
+      parameters:
+      - in: query
+        name: members
+        schema:
+          type: string
+        description: Filter by members
+      - in: query
+        name: owner
+        schema:
+          type: string
+        description: Filter by owner
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Project'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Project'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Project'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+          description: ''
+  /api/v1/projects/{id}/:
+    get:
+      operationId: v1_projects_retrieve
+      description: Handle GET request to retrieve a project.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+          description: ''
+    patch:
+      operationId: v1_projects_partial_update
+      description: Handle PATCH request to partially update a project.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedProject'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedProject'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedProject'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+          description: ''
+    delete:
+      operationId: v1_projects_destroy
+      description: Handle DELETE request to remove a project.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: Project deleted
+  /api/v1/projects/members/:
+    post:
+      operationId: v1_projects_members_create
+      description: Add or remove members based on the action provided in the request.
+      parameters:
+      - in: query
+        name: project_id
+        schema:
+          type: integer
+        description: Project ID to manage members
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+  /api/v1/projects/memberships/:
+    get:
+      operationId: v1_projects_memberships_list
+      description: Handle GET request to list memberships.
+      parameters:
+      - in: query
+        name: user_id
+        schema:
+          type: integer
+        description: Filter memberships by user
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectMembership'
+          description: ''
+    post:
+      operationId: v1_projects_memberships_create
+      description: Handle POST request to create a new membership.
+      parameters:
+      - in: query
+        name: user_id
+        schema:
+          type: integer
+        description: Filter memberships by user
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectMembership'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ProjectMembership'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProjectMembership'
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMembership'
+          description: ''
+  /api/v1/projects/memberships/{id}/:
+    get:
+      operationId: v1_projects_memberships_retrieve
+      description: Handle GET request to retrieve a project membership.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMembership'
+          description: ''
+    put:
+      operationId: v1_projects_memberships_update
+      description: Handle PUT request to update a project membership.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectMembership'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ProjectMembership'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProjectMembership'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMembership'
+          description: ''
+    delete:
+      operationId: v1_projects_memberships_destroy
+      description: Handle DELETE request to remove a project membership.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: Membership deleted
   /api/v1/subscriptions/cancel/:
     post:
       operationId: v1_subscriptions_cancel_create
@@ -758,6 +1036,32 @@ components:
           type: string
           format: email
           writeOnly: true
+    PatchedProject:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+          nullable: true
+        start_date:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/StatusEnum'
+        end_date:
+          type: string
+          format: date-time
+        owner:
+          type: string
+          readOnly: true
+        members:
+          type: string
+          readOnly: true
     Payment:
       type: object
       description: |-
@@ -822,6 +1126,65 @@ components:
           writeOnly: true
       required:
       - user
+    Project:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+          nullable: true
+        start_date:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/StatusEnum'
+        end_date:
+          type: string
+          format: date-time
+        owner:
+          type: string
+          readOnly: true
+        members:
+          type: string
+          readOnly: true
+      required:
+      - end_date
+      - id
+      - members
+      - name
+      - owner
+      - start_date
+    ProjectMembership:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        project:
+          type: string
+          readOnly: true
+        user:
+          type: string
+          readOnly: true
+        role:
+          $ref: '#/components/schemas/ProjectMembershipRoleEnum'
+      required:
+      - id
+      - project
+      - user
+    ProjectMembershipRoleEnum:
+      enum:
+      - owner
+      - member
+      type: string
+      description: |-
+        * `owner` - Owner
+        * `member` - Member
     PurposeEnum:
       enum:
       - REGISTRATION
@@ -832,14 +1195,18 @@ components:
         * `REGISTRATION` - REGISTRATION
         * `EMAIL_CHANGE` - EMAIL_CHANGE
         * `PASSWORD_RESET` - PASSWORD_RESET
-    RoleEnum:
+    StatusEnum:
       enum:
-      - admin
-      - user
+      - not_started
+      - in_progress
+      - completed
+      - archived
       type: string
       description: |-
-        * `admin` - Admin
-        * `user` - User
+        * `not_started` - Not Started
+        * `in_progress` - In Progress
+        * `completed` - Completed
+        * `archived` - Archived
     Subscription:
       type: object
       description: |-
@@ -941,7 +1308,7 @@ components:
           format: email
           maxLength: 254
         role:
-          $ref: '#/components/schemas/RoleEnum'
+          $ref: '#/components/schemas/UserRoleEnum'
         is_active:
           type: boolean
         first_name:
@@ -950,8 +1317,13 @@ components:
         last_name:
           type: string
           maxLength: 150
+        metadata:
+          allOf:
+          - $ref: '#/components/schemas/UserMetadata'
+          readOnly: true
       required:
       - email
+      - metadata
       - username
     UserLogin:
       type: object
@@ -963,6 +1335,24 @@ components:
           type: string
       required:
       - password
+      - username
+    UserMetadata:
+      type: object
+      description: Serializer to handle user metadata updates.
+      properties:
+        username:
+          type: string
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        profile_picture:
+          type: string
+          format: uri
+          nullable: true
+      required:
+      - email
       - username
     UserRegistration:
       type: object
@@ -995,6 +1385,14 @@ components:
       - password
       - password2
       - username
+    UserRoleEnum:
+      enum:
+      - admin
+      - user
+      type: string
+      description: |-
+        * `admin` - Admin
+        * `user` - User
   securitySchemes:
     jwtAuth:
       type: http

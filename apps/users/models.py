@@ -31,8 +31,6 @@ class User(AbstractUser):
     last_login = models.DateTimeField(null=True, blank=True)  # Date of the last login
     email_verified = models.BooleanField(default=False)  # Whether the user's email is verified
     pending_email = models.EmailField(null=True, blank=True, unique=True)  # Pending email before verification
-    email_otp = models.CharField(max_length=6, blank=True, null=True)  # OTP code for email verification
-    otp_secret = models.CharField(max_length=255, null=True, blank=True)  # Secret for OTP generation
 
     # Many-to-many relationships with Group and Permission
     groups = models.ManyToManyField('auth.Group', related_name='custom_user_groups', blank=True)
@@ -68,7 +66,7 @@ class Profile(models.Model):
 
 class UserMetadata(models.Model):
     """
-    UserMetadata model is created to store user metadata such as username, email, 
+    UserMetadata model is created to store user metadata such as username, email,
     and profile picture for faster access and retrieval.
     """
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='metadata')
@@ -84,6 +82,14 @@ class UserMetadata(models.Model):
         self.email = self.user.email
         self.profile_picture = self.user.profile_picture.url if self.user.profile_picture else None
         self.save()
+
+    def save(self, *args, **kwargs):
+        if not self.pk:
+            self.sync_from_user()  # Sync when creating
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Metadata for {self.user.username}"
 
 
 class OTPVerification(models.Model):

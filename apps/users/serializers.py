@@ -24,7 +24,14 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         token['role'] = user.role
         return token
 
-
+class UserMetadataSerializer(serializers.ModelSerializer):
+    """
+        Serializer to handle user metadata updates.
+    """
+    class Meta:
+        model = UserMetadata
+        fields = ['username', 'email', 'profile_picture']
+        read_only_fields = ['username', 'email'] 
 # User Registration Serializer
 class UserRegistrationSerializer(serializers.ModelSerializer):
     """
@@ -93,9 +100,10 @@ class UserSerializer(serializers.ModelSerializer):
     """
     Serializer to display user details.
     """
+    metadata = UserMetadataSerializer(read_only=True)
     class Meta:
         model = User
-        fields = ('username', 'email', 'role', 'is_active', 'first_name', 'last_name')
+        fields = ('username', 'email', 'role', 'is_active', 'first_name', 'last_name', 'metadata')
 
 
 # Profile Serializer

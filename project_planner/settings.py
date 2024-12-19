@@ -52,7 +52,6 @@ LOCAL_APPS = [
     'apps.users',
     'apps.projects',
     'apps.tasks',
-    'apps.payment',
     'apps.notifications',
     'apps.subscriptions',
 ]
