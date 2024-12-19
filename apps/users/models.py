@@ -54,7 +54,7 @@ class Profile(models.Model):
     city = models.CharField(max_length=100, blank=True, null=True)
     country = models.CharField(max_length=100, blank=True, null=True)
     date_of_birth = models.DateField(blank=True, null=True)
-    profile_picture = models.ImageField(upload_to='profile_pictures/', blank=True, null=True)
+    profile_picture = models.ImageField(upload_to='profile_pictures/', blank=True, null=True,default='default.jpg')
     profile_picture_change_count = models.PositiveIntegerField(default=0)  # Count of profile picture changes
     phone_number = models.CharField(max_length=15, blank=True, null=True)
     
@@ -74,7 +74,7 @@ class UserMetadata(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='metadata')
     username = models.CharField(max_length=150)
     email = models.EmailField()
-    profile_picture = models.URLField(null=True, blank=True)
+    profile_picture = models.ImageField(upload_to='profile_pictures/', null=True, blank=True) 
 
     def sync_from_user(self):
         """

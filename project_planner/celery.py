@@ -13,7 +13,7 @@ app = Celery('project_planner')
 app.config_from_object('django.conf:settings', namespace='CELERY')
 
 # Automatically discover tasks from installed apps.
-app.autodiscover_tasks(lambda: settings.INSTALLED_APPS)
+app.autodiscover_tasks(lambda: settings.INSTALLED_APPS + ['core.tasks'])
 
 @app.task(bind=True)
 def debug_task(self):

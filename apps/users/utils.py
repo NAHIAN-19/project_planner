@@ -1,52 +1,12 @@
-# from PIL import Image
-# from io import BytesIO
-# from django.core.files.base import ContentFile
-
-# def resize_image(image, size=(800, 800)):
-#     img = Image.open(image)
-#     img.thumbnail(size, Image.LANCZOS)
-
-#     output = BytesIO()
-    
-#     format = img.format
-    
-#     if format.upper() == 'JPEG':
-#         quality = 85
-#         img.save(output, format=format, quality=quality)
-#     elif format.upper() == 'PNG':
-#         img.save(output, format=format, optimize=True)
-#     else:
-#         img.save(output, format=format)
-    
-#     output.seek(0)
-    
-#     new_file_name = f"{image.name.split('.')[0]}.{format.lower()}"
-    
-#     return ContentFile(output.read(), name=new_file_name)
 # App Imports
 from apps.users.models import OTPVerification
-from apps.users.tasks import send_email
+from core.services.mail_service import EmailService
 # Django Imports
 import pyotp
 from django.utils.timezone import now, timedelta
 from django.core.exceptions import ObjectDoesNotExist
 # Third-Party Imports
 from rest_framework_simplejwt.tokens import RefreshToken
-
-class EmailService:
-    """
-    Service to handle email-related operations, such as sending OTP emails.
-    """
-    def send_otp_email(self, otp, email):
-        """
-        Send OTP code to the user's email.
-        Args:
-            otp (str): The OTP code to send.
-            email (str): The recipient's email address.
-        """
-        subject = "Your OTP Code"
-        message = f"Your OTP code is {otp}."
-        send_email.delay(subject, message, email)
         
 class OTPHandler:
     """
@@ -152,6 +112,15 @@ class OTPHandler:
             user.email = self.otp_obj.email
             user.pending_email = None
             user.save()
+            # Generate tokens for auto-login
+            refresh = RefreshToken.for_user(user)
+            tokens = {
+                'refresh': str(refresh),
+                'access': str(refresh.access_token),
+                'username': user.username,
+                'email': user.email,
+                'role': user.role
+            }
         elif self.purpose == 'EMAIL_CHANGE':
             user.email = self.otp_obj.email
             user.pending_email = None

@@ -12,6 +12,7 @@ urlpatterns = [
     
     # App-specific URLs
     path('api/v1/users/', include('apps.users.urls')),
+    path('api/v1/subscriptions/', include('apps.subscriptions.urls')),
     # path('api/v1/projects/', include('projects.urls')),
     # path('api/v1/tasks/', include('tasks.urls')),
     # path('api/v1/notifications/', include('notifications.urls')),

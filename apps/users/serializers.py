@@ -1,5 +1,5 @@
 # App imports
-from apps.users.models import Profile, OTPVerification, User
+from apps.users.models import Profile, OTPVerification, User, UserMetadata
 from apps.users.utils import OTPHandler
 # Django imports
 import pyotp
@@ -63,7 +63,6 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
 
         # Create profile
         Profile.objects.create(user=user)
-
         # Generate OTP for email verification
         secret = pyotp.random_base32()
         OTPVerification.objects.create(
@@ -298,7 +297,7 @@ class OtpVerificationSerializer(serializers.Serializer):
     """
     email = serializers.EmailField()
     otp = serializers.CharField()
-    purpose = serializers.ChoiceField(choices=['REGISTRATION', 'EMAIL_CHANGE', 'PASSWORD_RESET', 'LOGIN'])
+    purpose = serializers.ChoiceField(choices=['REGISTRATION', 'EMAIL_CHANGE', 'PASSWORD_RESET'])
 
     def validate(self, attrs):
         """
@@ -308,13 +307,20 @@ class OtpVerificationSerializer(serializers.Serializer):
         purpose = attrs['purpose']
 
         try:
-            user = User.objects.get(email=email) if purpose in ['PASSWORD_RESET', 'LOGIN'] else User.objects.get(pending_email=email)
+            if purpose == 'REGISTRATION' or purpose == 'EMAIL_CHANGE':
+                try:
+                    user = User.objects.get(pending_email=email)
+                except ObjectDoesNotExist:
+                    raise serializers.ValidationError({"email": "No pending registration found for this email."})
+            elif purpose == 'PASSWORD_RESET':
+                user = User.objects.get(email=email)
             otp_handler = OTPHandler(user, email, purpose)
             result, message = otp_handler.verify(attrs['otp'])
 
             if not result:
                 raise serializers.ValidationError({"otp": message})
-
+            attrs['otp_handler'] = otp_handler
+            attrs['otp_obj'] = otp_handler.otp_obj
             attrs['user'] = user
             return attrs
 

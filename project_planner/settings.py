@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 import os
 from datetime import timedelta
 from pathlib import Path
+from re import S
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -212,3 +213,33 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_BACKEND = 'django-db'
 CELERY_TIMEZONE = 'Asia/Dhaka'
 CELERY_TASK_RESULT_EXPIRES = 3600
+
+# Stripe Configuration
+# ====================
+
+STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY')
+STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY')
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
+# to use stripe webhook run this command in terminal : stripe listen --forward-to localhost:4242/webhook
+# tigger events to test webhook : stripe trigger payment_intent.succeeded
+FRONTEND_URL = 'http://localhost:3000'
+
+
+# Logging Configuration
+# =====================
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    }
+}
