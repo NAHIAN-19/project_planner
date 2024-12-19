@@ -4,6 +4,180 @@ info:
   version: 1.0.0
   description: API documentation for Project Planner.
 paths:
+  /api/v1/subscriptions/cancel/:
+    post:
+      operationId: v1_subscriptions_cancel_create
+      description: Cancel the authenticated user's subscription and revert to the
+        basic plan.
+      summary: Cancel subscription
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+  /api/v1/subscriptions/checkout-session/:
+    post:
+      operationId: v1_subscriptions_checkout_session_create
+      description: Generate a Stripe checkout session for the authenticated user to
+        upgrade their subscription.
+      summary: Create checkout session
+      parameters:
+      - in: query
+        name: plan_id
+        schema:
+          type: integer
+        description: ID of the subscription plan to upgrade to
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+  /api/v1/subscriptions/me/:
+    get:
+      operationId: v1_subscriptions_me_retrieve
+      description: Retrieve the details of the currently active subscription for the
+        authenticated user.
+      summary: Get current user's subscription details
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+          description: ''
+  /api/v1/subscriptions/payments/:
+    get:
+      operationId: v1_subscriptions_payments_list
+      description: Retrieve a list of all payments made by the authenticated user.
+      summary: List user payments
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Payment'
+          description: ''
+  /api/v1/subscriptions/plans/:
+    get:
+      operationId: v1_subscriptions_plans_list
+      description: Retrieve a list of all available subscription plans.
+      summary: List all subscription plans
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SubscriptionPlan'
+          description: ''
+  /api/v1/subscriptions/stripe/webhook/:
+    post:
+      operationId: v1_subscriptions_stripe_webhook_create
+      description: Handle events sent by Stripe, such as checkout session completion.
+      summary: Stripe webhook handler
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+  /api/v1/subscriptions/upgrade/:
+    post:
+      operationId: v1_subscriptions_upgrade_create
+      description: Upgrade the authenticated user's subscription plan to a higher-tier
+        plan.
+      summary: Upgrade subscription
+      parameters:
+      - in: query
+        name: plan_id
+        schema:
+          type: integer
+        description: ID of the new subscription plan
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
   /api/v1/users/login/:
     post:
       operationId: v1_users_login_create
@@ -488,6 +662,16 @@ components:
       required:
       - password
       - username
+    NameEnum:
+      enum:
+      - basic
+      - pro
+      - enterprise
+      type: string
+      description: |-
+        * `basic` - Basic
+        * `pro` - Pro
+        * `enterprise` - Enterprise
     OtpSend:
       type: object
       description: Serializer to send OTP for various purposes.
@@ -496,20 +680,10 @@ components:
           type: string
           format: email
         purpose:
-          $ref: '#/components/schemas/OtpSendPurposeEnum'
+          $ref: '#/components/schemas/PurposeEnum'
       required:
       - email
       - purpose
-    OtpSendPurposeEnum:
-      enum:
-      - REGISTRATION
-      - EMAIL_CHANGE
-      - PASSWORD_RESET
-      type: string
-      description: |-
-        * `REGISTRATION` - REGISTRATION
-        * `EMAIL_CHANGE` - EMAIL_CHANGE
-        * `PASSWORD_RESET` - PASSWORD_RESET
     OtpVerification:
       type: object
       description: Serializer to verify OTP.
@@ -520,23 +694,11 @@ components:
         otp:
           type: string
         purpose:
-          $ref: '#/components/schemas/OtpVerificationPurposeEnum'
+          $ref: '#/components/schemas/PurposeEnum'
       required:
       - email
       - otp
       - purpose
-    OtpVerificationPurposeEnum:
-      enum:
-      - REGISTRATION
-      - EMAIL_CHANGE
-      - PASSWORD_RESET
-      - LOGIN
-      type: string
-      description: |-
-        * `REGISTRATION` - REGISTRATION
-        * `EMAIL_CHANGE` - EMAIL_CHANGE
-        * `PASSWORD_RESET` - PASSWORD_RESET
-        * `LOGIN` - LOGIN
     PasswordResetConfirm:
       type: object
       description: Serializer to confirm password reset with a token.
@@ -596,6 +758,31 @@ components:
           type: string
           format: email
           writeOnly: true
+    Payment:
+      type: object
+      description: |-
+        Serializer for the Payment model.
+        Handles serialization of payment records for subscriptions.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        subscription:
+          type: integer
+          readOnly: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+        date:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - amount
+      - date
+      - id
+      - subscription
     Profile:
       type: object
       description: Serializer to handle user profile updates, including pending email
@@ -635,6 +822,16 @@ components:
           writeOnly: true
       required:
       - user
+    PurposeEnum:
+      enum:
+      - REGISTRATION
+      - EMAIL_CHANGE
+      - PASSWORD_RESET
+      type: string
+      description: |-
+        * `REGISTRATION` - REGISTRATION
+        * `EMAIL_CHANGE` - EMAIL_CHANGE
+        * `PASSWORD_RESET` - PASSWORD_RESET
     RoleEnum:
       enum:
       - admin
@@ -643,6 +840,80 @@ components:
       description: |-
         * `admin` - Admin
         * `user` - User
+    Subscription:
+      type: object
+      description: |-
+        Serializer for the Subscription model.
+        Includes details about the plan using a nested SubscriptionPlanSerializer.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          type: integer
+          readOnly: true
+        plan:
+          allOf:
+          - $ref: '#/components/schemas/SubscriptionPlan'
+          readOnly: true
+        start_date:
+          type: string
+          format: date-time
+          readOnly: true
+        end_date:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        is_active:
+          type: boolean
+          readOnly: true
+      required:
+      - end_date
+      - id
+      - is_active
+      - plan
+      - start_date
+      - user
+    SubscriptionPlan:
+      type: object
+      description: |-
+        Serializer for the SubscriptionPlan model.
+        Converts the SubscriptionPlan model instances into JSON and vice versa.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          $ref: '#/components/schemas/NameEnum'
+        description:
+          type: string
+          nullable: true
+        price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+        duration_days:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        max_projects:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -1
+          format: int64
+        max_members_per_project:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -1
+          format: int64
+      required:
+      - id
+      - max_members_per_project
+      - max_projects
+      - name
+      - price
     TokenRefresh:
       type: object
       properties:
