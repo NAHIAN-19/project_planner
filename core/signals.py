@@ -1,10 +1,14 @@
 # core/signals.py
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
-from apps.users.models import User, UserMetadata
-from core.tasks import create_or_update_user_metadata
+from apps.projects.models import ProjectMembership
+from core.tasks import update_project_member_count
 
-# Signal to create or update user metadata when a user is created/modified
-@receiver(post_save, sender=User)
-def create_or_update_user_metadata_signal(sender, instance, created, **kwargs):
-    create_or_update_user_metadata.delay(instance.id, created)
+
+# Signal to update membership count when a project membership is created or deleted
+@receiver([post_save, post_delete], sender=ProjectMembership)
+def handle_project_membership_change(sender, instance, **kwargs):
+    """
+    Signal to trigger the Celery task when a membership is created or deleted.
+    """
+    update_project_member_count.delay(instance.project.id)

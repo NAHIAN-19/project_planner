@@ -19,14 +19,6 @@ class User(AbstractUser):
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     
-    # Subscription type for member classification
-    subscription_type_choices = [
-        ('free', 'Free'),
-        ('standard', 'Standard'),
-        ('enterprise', 'Enterprise')
-    ]
-    subscription_type = models.CharField(max_length=20, choices=subscription_type_choices, default='free')
-    
     date_joined = models.DateTimeField(auto_now_add=True)  # Date when user joined
     last_login = models.DateTimeField(null=True, blank=True)  # Date of the last login
     email_verified = models.BooleanField(default=False)  # Whether the user's email is verified
@@ -53,7 +45,6 @@ class Profile(models.Model):
     country = models.CharField(max_length=100, blank=True, null=True)
     date_of_birth = models.DateField(blank=True, null=True)
     profile_picture = models.ImageField(upload_to='profile_pictures/', blank=True, null=True,default='default.jpg')
-    profile_picture_change_count = models.PositiveIntegerField(default=0)  # Count of profile picture changes
     phone_number = models.CharField(max_length=15, blank=True, null=True)
     
     # For Owners (or members part of specific projects)
@@ -62,34 +53,41 @@ class Profile(models.Model):
 
     def __str__(self):
         return f"Profile of {self.user.username}"
-
-
-class UserMetadata(models.Model):
-    """
-    UserMetadata model is created to store user metadata such as username, email,
-    and profile picture for faster access and retrieval.
-    """
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='metadata')
-    username = models.CharField(max_length=150)
-    email = models.EmailField()
-    profile_picture = models.ImageField(upload_to='profile_pictures/', null=True, blank=True) 
-
-    def sync_from_user(self):
+    def update_project_counts(self):
         """
-        Synchronize user metadata from the associated User model.
+        Updates the project counts for the user's profile.
+        This should be called whenever projects are added or removed.
         """
-        self.username = self.user.username
-        self.email = self.user.email
-        self.profile_picture = self.user.profile_picture.url if self.user.profile_picture else None
+        self.owned_projects_count = self.user.owned_projects.count()
+        self.participated_projects_count = self.user.project_memberships.count()
         self.save()
 
-    def save(self, *args, **kwargs):
-        if not self.pk:
-            self.sync_from_user()  # Sync when creating
-        super().save(*args, **kwargs)
 
-    def __str__(self):
-        return f"Metadata for {self.user.username}"
+# class UserMetadata(models.Model):
+#     """
+#     UserMetadata model is created to store user metadata such as username, email,
+#     and profile picture for faster access and retrieval.
+#     """
+#     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='metadata')
+#     username = models.CharField(max_length=150)
+#     email = models.EmailField()
+#     profile_picture = models.ImageField(upload_to='profile_pictures/', null=True, blank=True) 
+
+#     def sync_from_user(self):
+#         """
+#         Synchronize user metadata from the associated User model.
+#         """
+#         self.username = self.user.username
+#         self.email = self.user.email
+#         self.profile_picture = self.user.profile.profile_picture.url if self.user.profile.profile_picture else None
+        
+#     def save(self, *args, **kwargs):
+#         if not self.pk:
+#             self.sync_from_user()  # Sync when creating
+#         super().save(*args, **kwargs)
+
+#     def __str__(self):
+#         return f"Metadata for {self.user.username}"
 
 
 class OTPVerification(models.Model):

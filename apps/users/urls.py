@@ -18,7 +18,6 @@ urlpatterns = [
     
     # Profile endpoints
     path('profile/', views.ProfileView.as_view(), name='profile'),
-    path('profile/<int:user_id>/', views.ProfileView.as_view(), name='profile_by_id'),
     
     # Password management endpoints
     path('password/change/', views.ChangePasswordView.as_view(), name='change_password'),

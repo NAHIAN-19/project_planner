@@ -1,6 +1,8 @@
 # App imports
-from apps.users.models import Profile, OTPVerification, User, UserMetadata
+from apps import subscriptions
+from apps.users.models import Profile, OTPVerification, User
 from apps.users.utils import OTPHandler
+from apps.subscriptions.serializers import SubscriptionSerializer
 # Django imports
 import pyotp
 from django.contrib.auth.password_validation import validate_password
@@ -24,14 +26,6 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         token['role'] = user.role
         return token
 
-class UserMetadataSerializer(serializers.ModelSerializer):
-    """
-        Serializer to handle user metadata updates.
-    """
-    class Meta:
-        model = UserMetadata
-        fields = ['username', 'email', 'profile_picture']
-        read_only_fields = ['username', 'email'] 
 # User Registration Serializer
 class UserRegistrationSerializer(serializers.ModelSerializer):
     """
@@ -100,18 +94,19 @@ class UserSerializer(serializers.ModelSerializer):
     """
     Serializer to display user details.
     """
-    metadata = UserMetadataSerializer(read_only=True)
+    plan = serializers.CharField(source='subscription.plan.name', read_only=True)
     class Meta:
         model = User
-        fields = ('username', 'email', 'role', 'is_active', 'first_name', 'last_name', 'metadata')
+        fields = ('username', 'email', 'first_name', 'last_name', 'email_verified', 'plan')
+        read_only_fields = ('email','username',)
 
 
 # Profile Serializer
 class ProfileSerializer(serializers.ModelSerializer):
     """
-    Serializer to handle user profile updates, including pending email changes.
+    Serializer to handle user profile updates, including nested user updates and email changes.
     """
-    user = UserSerializer(read_only=True)
+    user = UserSerializer()  # Nested User Serializer
     pending_email = serializers.EmailField(write_only=True, required=False)
 
     class Meta:
@@ -123,18 +118,21 @@ class ProfileSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         """
-        Update profile and handle email change if necessary.
+        Update profile and handle nested user updates and email change if necessary.
         """
+        # Extract and process nested user data
         user_data = validated_data.pop('user', {})
         user = instance.user
-        pending_email = validated_data.pop('new_email', None)
 
-        # Update user fields
         for field, value in user_data.items():
+            # Avoid updating read-only fields like 'email' or 'username'
+            if field in ['email', 'username']:
+                continue
             setattr(user, field, value)
         user.save()
 
-        # Handle pending email change
+        # Handle pending email change if provided
+        pending_email = validated_data.pop('pending_email', None)
         if pending_email:
             self.handle_email_change(user, pending_email)
 

@@ -1,18 +1,17 @@
 # core/tasks.py
 from celery import shared_task
-from apps.users.models import User
+from apps.projects.models import Project
 from django.core.mail import send_mail
 from django.conf import settings
 
-# Task to create or update user metadata
+    
 @shared_task
-def create_or_update_user_metadata(sender, instance, created, **kwargs):
-    from apps.users.models import UserMetadata
-    if created:
-        UserMetadata.objects.create(user=instance)  # Create user metadata on user creation
-    else:
-        instance.metadata.sync_from_user()
-
+def update_project_member_count(project_id):
+    """
+    Task to update the total_member_count for a project.
+    """
+    project = Project.objects.get(id=project_id)
+    project.update_member_count()
 # Task to send emails
 @shared_task
 def send_email(subject, message, recipient):

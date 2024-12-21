@@ -220,9 +220,6 @@ class LogoutView(APIView):
 @extend_schema(
     description="Handles user profile retrieval and updates",
     methods=['GET', 'PUT', 'PATCH'],
-    parameters=[
-        OpenApiParameter(name='user_id', description='Optional user ID to get specific profile', required=False, type=int)
-    ],
     responses={
         200: ProfileSerializer,
         403: OpenApiResponse(description="Permission denied"),
@@ -231,37 +228,23 @@ class LogoutView(APIView):
 )
 class ProfileView(RetrieveUpdateAPIView):
     """
-    Handles user profile retrieval and updates.
+    Handles user profile retrieval and updates, ensuring only the authenticated user can access and update their profile.
     """
     permission_classes = [IsAuthenticated]
     serializer_class = ProfileSerializer
 
     def get_object(self):
         """
-        Return the profile of the authenticated user or a user by their ID.
-        If user_id is provided in the URL, return that user's profile,
-        otherwise, return the current user's profile.
+        Return the profile of the authenticated user.
+        This ensures only the logged-in user can access their own profile.
         """
-        user_id = self.kwargs.get('user_id')
-        if user_id:
-            try:
-                return Profile.objects.get(user__id=user_id)
-            except Profile.DoesNotExist:
-                raise serializers.ValidationError(
-                    {"error": f"Profile not found for user ID {user_id}"}
-                )
         return self.request.user.profile
 
     def update(self, request, *args, **kwargs):
         """
-        Handle profile updates, including triggering OTPs for email change.
+        Handle profile updates for the authenticated user only.
         """
-        user_id = kwargs.get('user_id')
-        if user_id and user_id != str(request.user.id):
-            return Response(
-                {"error": "You do not have permission to perform this action."},
-                status=status.HTTP_403_FORBIDDEN
-            )
+        # Ensure the request is for the logged-in user's profile
         instance = request.user.profile
         partial = kwargs.pop('partial', True)  # Allow partial updates
         serializer = self.get_serializer(instance, data=request.data, partial=partial)

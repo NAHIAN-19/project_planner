@@ -1,79 +1,124 @@
-from rest_framework import serializers
-from .models import Project, ProjectMembership
+# Local imports
+from apps.projects.models import Project, ProjectMembership
+# django imports
 from django.contrib.auth import get_user_model
+# third-party imports
+from rest_framework import serializers
 
+# Get the custom User model
 User = get_user_model()
 
+class CustomUserSerializer(serializers.ModelSerializer):
+    """
+    Serializer for the User model to expose the user details.
+    """
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email', 'last_login']
+
 class ProjectMembershipSerializer(serializers.ModelSerializer):
-    user = serializers.StringRelatedField()  # Displays the user's username
-    project = serializers.StringRelatedField()  # Displays the project's name
+    """
+    Serializer for the ProjectMembership model, exposing details about 
+    the user and their project membership (joined date, total tasks, and completed tasks).
+    """
+    user = CustomUserSerializer(read_only=True)
 
     class Meta:
         model = ProjectMembership
-        fields = ['id', 'project', 'user', 'role']
-        read_only_fields = ['project', 'user']
+        fields = ['user', 'joined_at', 'total_tasks', 'completed_tasks']
+
 
 class ProjectSerializer(serializers.ModelSerializer):
-    owner = serializers.StringRelatedField(read_only=True)  # Displays the owner's username
-    members = serializers.SerializerMethodField()  # Fetch related members
-    
+    """
+    Serializer for the Project model, exposing project details and related memberships.
+    """
+    owner = CustomUserSerializer(read_only=True)
+    members = ProjectMembershipSerializer(source='memberships', many=True, read_only=True)
+
     class Meta:
         model = Project
-        fields = ['id', 'name', 'description', 'start_date', 'status', 'end_date', 'owner', 'members']
+        fields = [
+            'id', 'name', 'description', 'created_at', 
+            'total_tasks', 'status', 'due_date', 'total_member_count', 
+            'owner', 'members'
+        ]
+        read_only_fields = ['id', 'owner', 'created_at', 'total_tasks', 'total_member_count']
 
-    def get_members(self, obj):
-        memberships = ProjectMembership.objects.filter(project=obj)
-        return ProjectMembershipSerializer(memberships, many=True).data
+
+class ProjectCreateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for creating a new project. Handles adding members to the project.
+    """
+    members = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), many=True, write_only=True)
+
+    class Meta:
+        model = Project
+        fields = ['name', 'description', 'due_date', 'members']
 
     def create(self, validated_data):
-        # Extract the members field
-        members_data = validated_data.pop('members', [])
-        # Create the project itself
-        project = Project.objects.create(**validated_data)
-        
-        # Add the project owner (current user) as the first member
-        owner = self.context['request'].user  # Assuming the user creating the project is the owner
-        ProjectMembership.objects.create(
-            project=project, 
-            user=owner, 
-            role='owner', 
-            user_metadata=owner.metadata
-        )
-        
-        # Add additional members, excluding the owner
-        for user_id in members_data:
-            user = User.objects.get(id=user_id)
-            if user != owner:  # Avoid adding the owner again
-                ProjectMembership.objects.create(
-                    project=project,
-                    user=user,
-                    role='member',
-                    user_metadata=user.metadata
-                )
+        """
+        Create a new project and add members, including the owner.
+        """
+        members = validated_data.pop('members', [])
+        owner = self.context['request'].user
+
+        # Create the project and assign the owner
+        project = Project.objects.create(**validated_data, owner=owner)
+
+        # Add the owner as a member
+        ProjectMembership.objects.create(project=project, user=owner)
+
+        # Add other members if not already the owner
+        for user in members:
+            if user != owner:
+                ProjectMembership.objects.create(project=project, user=user)
 
         return project
 
-class ProjectMemberSerializer(serializers.Serializer):
-    members = serializers.ListField(
-        child=serializers.IntegerField(), required=True
-    )
+    def to_representation(self, instance):
+        """
+        Override to use the ProjectSerializer for representation after creation.
+        """
+        return ProjectSerializer(instance).data
 
-    def validate_members(self, value):
-        # Ensure the list is not empty
-        if not value:
-            raise serializers.ValidationError("At least one member must be provided.")
-        return value
 
-    def update_members(self, project, user_ids):
-        # Add members
-        for user_id in user_ids:
-            user = User.objects.get(id=user_id)
-            
-            # Check if user is already a member
-            if ProjectMembership.objects.filter(project=project, user=user).exists():
-                continue  # Skip if already a member
-            
-            # Create membership
-            ProjectMembership.objects.create(project=project, user=user)
-        
-        return ProjectMembership.objects.filter(project=project, user__id__in=user_ids)
+class ProjectUpdateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for updating project details. Optionally updates the project's members.
+    """
+    members = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), many=True, required=False)
+
+    class Meta:
+        model = Project
+        fields = ['name', 'description', 'due_date', 'status', 'members']
+
+    def update(self, instance, validated_data):
+        """
+        Update the project fields and manage membership changes (add or remove members).
+        """
+        members = validated_data.pop('members', None)
+
+        # Update the project fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # If members data is provided, update the members
+        if members is not None:
+            current_members = set(instance.members.all())
+            new_members = set(members)
+
+            # Ensure the owner is not removed from the project
+            if instance.owner not in new_members:
+                new_members.add(instance.owner)
+
+            # Remove members who are no longer part of the project
+            to_remove = current_members - new_members
+            ProjectMembership.objects.filter(project=instance, user__in=to_remove).delete()
+
+            # Add new members to the project
+            to_add = new_members - current_members
+            for user in to_add:
+                ProjectMembership.objects.create(project=instance, user=user)
+
+        return instance

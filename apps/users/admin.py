@@ -1,5 +1,5 @@
 from django.contrib import admin
-from apps.users.models import User, Profile, OTPVerification, UserMetadata
+from apps.users.models import User, Profile, OTPVerification
 # Register your models here.
 class ProfileInLine(admin.StackedInline):
     model = Profile
@@ -40,17 +40,7 @@ class OTPVerificationAdmin(admin.ModelAdmin):
     list_filter = ('purpose', 'is_verified')
     ordering = ('-created_at', )
     
-class UserMetadataAdmin(admin.ModelAdmin):
-    list_display = ('user', 'username', 'email', 'profile_picture')
-    search_fields = ('user__username', 'email')
-    ordering = ('user__username', )
     
-    def profile_picture(self, instance):
-        return instance.profile_picture
-
-    profile_picture.short_description = 'Profile Picture'
-    
-admin.site.register(UserMetadata, UserMetadataAdmin)
 admin.site.register(OTPVerification, OTPVerificationAdmin)
 admin.site.register(User,UserAdmin)
 admin.site.register(Profile)
