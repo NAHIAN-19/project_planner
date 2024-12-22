@@ -61,7 +61,9 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
         """
         members = validated_data.pop('members', [])
         owner = self.context['request'].user
-
+        # if owner id is in validated_data, remove it
+        if 'owner' in validated_data:
+            validated_data.pop('owner')
         # Create the project and assign the owner
         project = Project.objects.create(**validated_data, owner=owner)
 

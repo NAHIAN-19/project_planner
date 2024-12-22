@@ -1,4 +1,5 @@
 # Local imports
+from apps import subscriptions
 from apps.projects.models import Project, ProjectMembership
 from apps.projects.serializers import (
     ProjectSerializer, ProjectCreateSerializer, ProjectMembershipSerializer, ProjectUpdateSerializer
@@ -11,12 +12,24 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView, GenericAPIView
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
 
 # Get the custom user model
 User = get_user_model()
+
+def standardized_response(status_code, status_message, message, data=None):
+    """
+    Utility to create standardized API responses.
+    """
+    response = {
+        "status": status_message,
+        "message": message,
+    }
+    if data is not None:
+        response["data"] = data
+    return Response(response, status=status_code)
 
 class ProjectListCreateView(ListCreateAPIView):
     """
@@ -55,13 +68,28 @@ class ProjectListCreateView(ListCreateAPIView):
         """
         Handle project creation.
         """
-        return super().post(request, *args, **kwargs)
+        response = super().post(request, *args, **kwargs)
+        return standardized_response(
+            status_code=response.status_code,
+            status_message="success" if response.status_code == 201 else "error",
+            message="Project created successfully." if response.status_code == 201 else "Failed to create project.",
+            data=response.data
+        )
 
     def perform_create(self, serializer):
         """
         Perform the creation of the project and assign the current user as the owner.
         """
+        user = self.request.user
+        subscription = user.subscription
+        plan = subscription.plan if subscription else None
+        if plan and plan.max_projects != 1 and plan.max_projects <= user.profile.owned_projects_count:
+            raise ValidationError(
+                f"Your plan allows a maximum of {plan.max_projects} projects. Upgrade your plan to create more projects."
+            )
         serializer.save(owner=self.request.user)
+        user.profile.owned_projects_count += 1
+        user.profile.save()
 
 class ProjectRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView):
     """
@@ -98,7 +126,13 @@ class ProjectRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView):
         """
         Handle project update.
         """
-        return super().put(request, *args, **kwargs)
+        response = super().put(request, *args, **kwargs)
+        return standardized_response(
+            status_code=response.status_code,
+            status_message="success",
+            message="Project updated successfully.",
+            data=response.data
+        )
 
     @extend_schema(
         summary="Partially Update a Project",
@@ -111,7 +145,13 @@ class ProjectRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView):
         """
         Handle partial project update.
         """
-        return super().patch(request, *args, **kwargs)
+        response = super().patch(request, *args, **kwargs)
+        return standardized_response(
+            status_code=response.status_code,
+            status_message="success",
+            message="Project partially updated successfully.",
+            data=response.data
+        )
 
     @extend_schema(
         summary="Delete a Project",
@@ -124,7 +164,12 @@ class ProjectRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView):
         """
         Handle project deletion.
         """
-        return super().delete(request, *args, **kwargs)
+        response = super().delete(request, *args, **kwargs)
+        return standardized_response(
+            status_code=status.HTTP_204_NO_CONTENT,
+            status_message="success",
+            message="Project deleted successfully."
+        )
 
     def perform_update(self, serializer):
         """
@@ -173,9 +218,10 @@ class MemberManageView(GenericAPIView):
         project = Project.objects.filter(id=project_id, owner=request.user).first()
 
         if not project:
-            return Response(
-                {'status': 'error', 'message': 'You do not have permission to manage this project.'},
-                status=status.HTTP_403_FORBIDDEN
+            return standardized_response(
+                status_code=status.HTTP_403_FORBIDDEN,
+                status_message="error",
+                message="You do not have permission to manage this project."
             )
 
         added_users = []
@@ -189,13 +235,15 @@ class MemberManageView(GenericAPIView):
                 else:
                     already_members.append(user.username)
 
-        response_data = {
-            'status': 'success',
-            'message': 'Member management completed.',
-            'added_users': added_users,
-            'already_members': already_members
-        }
-        return Response(response_data, status=status.HTTP_200_OK)
+        return standardized_response(
+            status_code=status.HTTP_200_OK,
+            status_message="success",
+            message="Member management completed.",
+            data={
+                "added_users": added_users,
+                "already_members": already_members
+            }
+        )
 
     @extend_schema(
         summary="Remove Members from Project",
@@ -233,16 +281,18 @@ class MemberManageView(GenericAPIView):
         project = Project.objects.filter(id=project_id, owner=request.user).first()
 
         if not project:
-            return Response(
-                {'status': 'error', 'message': 'You do not have permission to manage this project.'},
-                status=status.HTTP_403_FORBIDDEN
+            return standardized_response(
+                status_code=status.HTTP_403_FORBIDDEN,
+                status_message="error",
+                message="You do not have permission to manage this project."
             )
 
         # Ensure owner is not in the list of users to be removed
         if project.owner.id in user_ids:
-            return Response(
-                {'status': 'error', 'message': 'Cannot remove the project owner from members.'},
-                status=status.HTTP_400_BAD_REQUEST
+            return standardized_response(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                status_message="error",
+                message="Cannot remove the project owner from members."
             )
 
         removed_users = []
@@ -257,10 +307,12 @@ class MemberManageView(GenericAPIView):
                 user = User.objects.filter(id=user_id).first()
                 not_found_users.append(user.username if user else f"UserID:{user_id}")
 
-        response_data = {
-            'status': 'success',
-            'message': 'Member removal completed.',
-            'removed_users': removed_users,
-            'not_found_users': not_found_users
-        }
-        return Response(response_data, status=status.HTTP_200_OK)
+        return standardized_response(
+            status_code=status.HTTP_200_OK,
+            status_message="success",
+            message="Member removal completed.",
+            data={
+                "removed_users": removed_users,
+                "not_found_users": not_found_users
+            }
+        )

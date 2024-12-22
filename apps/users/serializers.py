@@ -108,12 +108,14 @@ class ProfileSerializer(serializers.ModelSerializer):
     """
     user = UserSerializer()  # Nested User Serializer
     pending_email = serializers.EmailField(write_only=True, required=False)
+    first_name = serializers.CharField(source='user.first_name', required=False)
+    last_name = serializers.CharField(source='user.last_name', required=False)
 
     class Meta:
         model = Profile
         fields = (
-            'user', 'address', 'city', 'country', 'date_of_birth',
-            'profile_picture', 'phone_number', 'pending_email'
+            'user', 'address', 'city', 'country', 'date_of_birth','first_name','last_name',
+            'profile_picture', 'phone_number', 'pending_email', 'owned_projects_count', 'participated_projects_count'
         )
 
     def update(self, instance, validated_data):
@@ -122,11 +124,12 @@ class ProfileSerializer(serializers.ModelSerializer):
         """
         # Extract and process nested user data
         user_data = validated_data.pop('user', {})
+        print(user_data)
         user = instance.user
 
         for field, value in user_data.items():
             # Avoid updating read-only fields like 'email' or 'username'
-            if field in ['email', 'username']:
+            if field in ['email', 'username', 'role', 'email_verified', 'subscription', 'is_active', 'is_staff', 'is_superuser']:
                 continue
             setattr(user, field, value)
         user.save()
