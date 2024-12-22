@@ -7,7 +7,7 @@ urlpatterns = [
     path('plans/', views.SubscriptionPlanListView.as_view(), name='subscription-plan-list'),
 
     # Retrieves details of the current user's subscription
-    path('me/', views.SubscriptionDetailView.as_view(), name='current-subscription-detail'),
+    path('me/', views.SubscriptionDetailView.as_view(), name='subscription-detail'),
 
     # Upgrades the current user's subscription plan
     path('upgrade/', views.UpgradeSubscriptionView.as_view(), name='upgrade-subscription'),
