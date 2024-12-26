@@ -4,6 +4,245 @@ info:
   version: 1.0.0
   description: API documentation for Project Planner.
 paths:
+  /api/v1/notifications/:
+    get:
+      operationId: v1_notifications_list
+      description: |-
+        API endpoint for listing and creating notifications.
+        Requires authentication.
+      tags:
+      - Notifications
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Notification'
+          description: ''
+    post:
+      operationId: v1_notifications_create
+      description: |-
+        API endpoint for listing and creating notifications.
+        Requires authentication.
+      tags:
+      - Notifications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Notification'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Notification'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Notification'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+          description: ''
+  /api/v1/notifications/{id}/:
+    get:
+      operationId: v1_notifications_retrieve
+      description: |-
+        API endpoint for retrieving, updating and deleting individual notifications.
+        Requires authentication.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Notifications
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+          description: ''
+    put:
+      operationId: v1_notifications_update
+      description: |-
+        API endpoint for retrieving, updating and deleting individual notifications.
+        Requires authentication.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Notifications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Notification'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Notification'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Notification'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+          description: ''
+    patch:
+      operationId: v1_notifications_partial_update
+      description: |-
+        API endpoint for retrieving, updating and deleting individual notifications.
+        Requires authentication.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Notifications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedNotification'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedNotification'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedNotification'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+          description: ''
+    delete:
+      operationId: v1_notifications_destroy
+      description: |-
+        API endpoint for retrieving, updating and deleting individual notifications.
+        Requires authentication.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Notifications
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/notifications/preferences/:
+    get:
+      operationId: v1_notifications_preferences_retrieve
+      description: |-
+        API endpoint for managing notification preferences.
+        Requires authentication.
+      tags:
+      - Notification Preferences
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreference'
+          description: ''
+    put:
+      operationId: v1_notifications_preferences_update
+      description: |-
+        API endpoint for managing notification preferences.
+        Requires authentication.
+      tags:
+      - Notification Preferences
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationPreference'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/NotificationPreference'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/NotificationPreference'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreference'
+          description: ''
+    patch:
+      operationId: v1_notifications_preferences_partial_update
+      description: |-
+        API endpoint for managing notification preferences.
+        Requires authentication.
+      tags:
+      - Notification Preferences
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedNotificationPreference'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedNotificationPreference'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedNotificationPreference'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreference'
+          description: ''
+    delete:
+      operationId: v1_notifications_preferences_destroy
+      description: |-
+        API endpoint for managing notification preferences.
+        Requires authentication.
+      tags:
+      - Notification Preferences
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/v1/projects/:
     get:
       operationId: v1_projects_list
@@ -490,7 +729,56 @@ paths:
           description: ''
     post:
       operationId: v1_tasks_create
-      description: View to list all tasks or create a new task with assignees.
+      description: Retrieve a list of tasks with filters or create a new task.
+      summary: List and Create Tasks
+      parameters:
+      - in: query
+        name: assigned_by
+        schema:
+          type: integer
+        description: Filter tasks by assigner ID
+      - in: query
+        name: due_date
+        schema:
+          type: string
+        description: Filter tasks by due date
+      - in: query
+        name: need_approval
+        schema:
+          type: boolean
+        description: Filter tasks requiring approval
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: page
+        schema:
+          type: integer
+        description: Page number for pagination
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+        description: Number of items per page
+      - in: query
+        name: project
+        schema:
+          type: integer
+        description: Filter tasks by project ID
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: Filter tasks by status
       tags:
       - v1
       requestBody:
@@ -508,16 +796,39 @@ paths:
       security:
       - jwtAuth: []
       responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTaskList'
+          description: ''
         '201':
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskCreate'
+                $ref: '#/components/schemas/Task'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
           description: ''
   /api/v1/tasks/{id}/:
     get:
       operationId: v1_tasks_retrieve
-      description: Handle the GET request to retrieve task details.
+      description: Retrieve task details, update them, or delete the task.
+      summary: Retrieve, Update or Delete Task
       parameters:
       - in: path
         name: id
@@ -534,6 +845,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Task'
+          description: ''
+        '204':
+          description: No response body
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
           description: ''
     put:
       operationId: v1_tasks_update
@@ -569,7 +890,8 @@ paths:
           description: ''
     patch:
       operationId: v1_tasks_partial_update
-      description: Handle the PATCH request to update the task.
+      description: Partially update task details.
+      summary: Partially Update Task
       parameters:
       - in: path
         name: id
@@ -596,11 +918,20 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskUpdate'
+                $ref: '#/components/schemas/Task'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
           description: ''
     delete:
       operationId: v1_tasks_destroy
-      description: Handle the DELETE request to delete a task.
+      description: Delete a specific task.
+      summary: Delete Task
       parameters:
       - in: path
         name: id
@@ -614,6 +945,14 @@ paths:
       responses:
         '204':
           description: No response body
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
   /api/v1/tasks/comments/:
     get:
       operationId: v1_tasks_comments_list
@@ -860,6 +1199,7 @@ paths:
   /api/v1/tasks/status-change-requests/:
     get:
       operationId: v1_tasks_status_change_requests_list
+      description: API view for listing and creating status change requests.
       parameters:
       - name: page
         required: false
@@ -886,6 +1226,7 @@ paths:
           description: ''
     post:
       operationId: v1_tasks_status_change_requests_create
+      description: API view for listing and creating status change requests.
       tags:
       - v1
       requestBody:
@@ -912,6 +1253,8 @@ paths:
   /api/v1/tasks/status-change-requests/{id}/:
     get:
       operationId: v1_tasks_status_change_requests_retrieve
+      description: Retrieve details of a specific status change request by its ID.
+      summary: Retrieve Status Change Request
       parameters:
       - in: path
         name: id
@@ -929,8 +1272,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/StatusChangeRequest'
           description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
     put:
       operationId: v1_tasks_status_change_requests_update
+      description: API view for retrieving, updating, or deleting a specific status
+        change request.
       parameters:
       - in: path
         name: id
@@ -962,6 +1315,8 @@ paths:
           description: ''
     patch:
       operationId: v1_tasks_status_change_requests_partial_update
+      description: API view for retrieving, updating, or deleting a specific status
+        change request.
       parameters:
       - in: path
         name: id
@@ -992,6 +1347,8 @@ paths:
           description: ''
     delete:
       operationId: v1_tasks_status_change_requests_destroy
+      description: Delete a specific status change request.
+      summary: Delete Status Change Request
       parameters:
       - in: path
         name: id
@@ -1005,9 +1362,21 @@ paths:
       responses:
         '204':
           description: No response body
+        '404':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
   /api/v1/tasks/status-change-requests/{id}/accept-reject/:
     post:
       operationId: v1_tasks_status_change_requests_accept_reject_create
+      description: Approve or reject a pending status change request by specifying
+        the action ('accept' or 'reject'). Automatically updates the task status if
+        accepted.
+      summary: Accept/Reject Status Change Request
       parameters:
       - in: path
         name: id
@@ -1016,22 +1385,54 @@ paths:
         required: true
       tags:
       - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+              description: Unspecified request body
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: {}
+              description: Unspecified request body
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: {}
+              description: Unspecified request body
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusChangeRequest'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
   /api/v1/tasks/status-change/{id}/:
     patch:
       operationId: v1_tasks_status_change_partial_update
-      description: |-
-        Handles PATCH requests to update a task's status.
-
-        Arguments:
-            pk: The primary key of the task to be updated.
-
-        Returns:
-            Response with status code 200 for successful updates or 400 for failed validation.
+      description: Update the status of a task if the user is assigned and the task
+        does not require approval.
+      summary: Update Task Status
       parameters:
       - in: path
         name: id
@@ -1040,11 +1441,52 @@ paths:
         required: true
       tags:
       - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTaskStatusChange'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTaskStatusChange'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTaskStatusChange'
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
   /api/v1/users/login/:
     post:
       operationId: v1_users_login_create
@@ -1553,6 +1995,65 @@ components:
         * `basic` - Basic
         * `pro` - Pro
         * `enterprise` - Enterprise
+    Notification:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        recipient:
+          type: integer
+          description: User who will receive the notification
+        sender:
+          type: integer
+          nullable: true
+          description: User who triggered the notification
+        message:
+          type: string
+          description: Content of the notification
+        is_read:
+          type: boolean
+          description: Indicates if the notification has been read
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Timestamp when notification was created
+        notification_type:
+          type: string
+          description: Category of notification (e.g., task, project)
+          maxLength: 50
+        content_type:
+          type: integer
+          nullable: true
+          description: Type of object this notification refers to
+        object_id:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+          description: ID of the related object
+        content_object_str:
+          type: string
+          readOnly: true
+      required:
+      - content_object_str
+      - created_at
+      - id
+      - message
+      - notification_type
+      - recipient
+    NotificationPreference:
+      type: object
+      properties:
+        user:
+          type: integer
+          description: User whose notification preferences these are
+        preferences:
+          description: JSON object storing notification preferences
+      required:
+      - user
     OtpSend:
       type: object
       description: Serializer to send OTP for various purposes.
@@ -1715,6 +2216,56 @@ components:
         replies:
           type: string
           readOnly: true
+    PatchedNotification:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        recipient:
+          type: integer
+          description: User who will receive the notification
+        sender:
+          type: integer
+          nullable: true
+          description: User who triggered the notification
+        message:
+          type: string
+          description: Content of the notification
+        is_read:
+          type: boolean
+          description: Indicates if the notification has been read
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Timestamp when notification was created
+        notification_type:
+          type: string
+          description: Category of notification (e.g., task, project)
+          maxLength: 50
+        content_type:
+          type: integer
+          nullable: true
+          description: Type of object this notification refers to
+        object_id:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+          description: ID of the related object
+        content_object_str:
+          type: string
+          readOnly: true
+    PatchedNotificationPreference:
+      type: object
+      properties:
+        user:
+          type: integer
+          description: User whose notification preferences these are
+        preferences:
+          description: JSON object storing notification preferences
     PatchedProfile:
       type: object
       description: Serializer to handle user profile updates, including nested user
@@ -1817,6 +2368,14 @@ components:
           type: integer
           readOnly: true
           nullable: true
+    PatchedTaskStatusChange:
+      type: object
+      description: |-
+        Serializer to handle the task status update. This serializer only validates
+        the status change for tasks that do not require approval.
+      properties:
+        status:
+          $ref: '#/components/schemas/StatusA33Enum'
     PatchedTaskUpdate:
       type: object
       description: Serializer for updating task details, including managing assignees.

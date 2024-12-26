@@ -47,6 +47,7 @@ THIRD_PARTY_APPS = [
     'django_celery_beat',
     'django_celery_results',
     'django_filters',
+    'channels',
 ]
 
 LOCAL_APPS = [
@@ -95,6 +96,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'project_planner.wsgi.application'
+ASGI_APP_MODULE = 'project_planner.asgi.application'
 
 # Database Configuration
 # ====================
@@ -163,6 +165,17 @@ CACHES = {
     }
 }
 
+# Redis for channel layers
+# ========================
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            'hosts': [f'redis://:{os.getenv("REDIS_PASSWORD")}@127.0.0.1:6379/1'],
+        },
+    },
+}
+
 SESSION_ENGINE = "django.contrib.sessions.backends.cache"
 SESSION_CACHE_ALIAS = "default"
 
@@ -184,8 +197,8 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.AnonRateThrottle',
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'user': '100/day',  # Allow 100 requests per user per day
-        'anon': '10/hour',  # Allow 10 requests per anonymous user per hour
+        'user': '1000/day',  # Allow 100 requests per user per day
+        'anon': '100/hour',  # Allow 10 requests per anonymous user per hour
     },
 }
 

@@ -15,7 +15,7 @@ urlpatterns = [
     path('api/v1/subscriptions/', include('apps.subscriptions.urls')),
     path('api/v1/projects/', include('apps.projects.urls')),
     path('api/v1/tasks/', include('apps.tasks.urls')),
-    # path('api/v1/notifications/', include('notifications.urls')),
+    path('api/v1/notifications/', include('apps.notifications.urls')),
 
     # DRF Spectacular Schema URLs
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),  # OpenAPI Schema

@@ -1,3 +1,4 @@
+from rest_framework import permissions
 from rest_framework.permissions import BasePermission
 from apps.projects.models import Project
 from apps.tasks.models import Task
@@ -22,3 +23,9 @@ class IsTaskAssigneeOrProjectMember(BasePermission):
             obj.author == request.user or
             obj.task.assignments.filter(user=request.user).exists()
         )
+class IsProjectOwnerOrReadOnly(BasePermission):
+    """
+    Custom permission to allow only project owners to modify status change requests.
+    """
+    def has_object_permission(self, request, view, obj):
+        return request.method in permissions.SAFE_METHODS or obj.task.project.owner == request.user
