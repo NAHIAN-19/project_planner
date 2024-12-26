@@ -1,6 +1,7 @@
 # Local imports
 from apps import subscriptions
 from apps.projects.models import Project, ProjectMembership
+from apps.projects.permissions import IsProjectOwnerOrReadOnly
 from apps.projects.serializers import (
     ProjectSerializer, ProjectCreateSerializer, ProjectMembershipSerializer, ProjectUpdateSerializer
 )

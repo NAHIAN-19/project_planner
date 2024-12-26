@@ -1,6 +1,6 @@
-# from django.contrib import admin
-# from tasks.models import Task, TaskComment, TaskStatusReport
+from django.contrib import admin
+from apps.tasks.models import Task, TaskAssignment, Comment
 
-# admin.site.register(Task)
-# admin.site.register(TaskComment)
-# admin.site.register(TaskStatusReport)
+admin.site.register(Task)
+admin.site.register(TaskAssignment)
+admin.site.register(Comment)
