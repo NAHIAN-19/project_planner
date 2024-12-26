@@ -46,6 +46,7 @@ THIRD_PARTY_APPS = [
     'corsheaders',
     'django_celery_beat',
     'django_celery_results',
+    'django_filters',
 ]
 
 LOCAL_APPS = [
@@ -175,6 +176,17 @@ REST_FRAMEWORK = {
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_FILTER_BACKENDS': [
+        'django_filters.rest_framework.DjangoFilterBackend'
+    ],
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.UserRateThrottle',
+        'rest_framework.throttling.AnonRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'user': '100/day',  # Allow 100 requests per user per day
+        'anon': '10/hour',  # Allow 10 requests per anonymous user per hour
+    },
 }
 
 # JWT Configuration
