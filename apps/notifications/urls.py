@@ -1,13 +1,16 @@
 from django.urls import path
 from apps.notifications.views import (
-    NotificationListCreateView,
-    NotificationRetrieveUpdateDestroyView,
-    NotificationPreferenceRetrieveUpdateDestroyView,
+    NotificationListView,
+    NotificationDetailView,
+    NotificationPreferenceView,
 )
 
 urlpatterns = [
     # Base url : /api/v1/notifications/
-    path('', NotificationListCreateView.as_view(), name='notification-list-create'),
-    path('<int:pk>/', NotificationRetrieveUpdateDestroyView.as_view(), name='notification-detail'),
-    path('preferences/', NotificationPreferenceRetrieveUpdateDestroyView.as_view(), name='notification-preference'),
+    # List all notifications and if post request is made, mark all/specific notifications as read
+    path('', NotificationListView.as_view(), name='notification-list'),
+    # Retrieve, update, or delete a specific notification
+    path('<int:pk>/', NotificationDetailView.as_view(), name='notification-detail'),
+    # Update notification preferences for the authenticated user
+    path('preferences/', NotificationPreferenceView.as_view(), name='notification-preference'),
 ]

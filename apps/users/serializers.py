@@ -99,7 +99,17 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ('username', 'email', 'first_name', 'last_name', 'email_verified', 'plan')
         read_only_fields = ('email','username',)
-
+        
+# User Serializer for listview
+class CustomUserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'username']
+# User Serializer for create,update,delete view
+class DetailedUserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email', 'last_login']
 
 # Profile Serializer
 class ProfileSerializer(serializers.ModelSerializer):

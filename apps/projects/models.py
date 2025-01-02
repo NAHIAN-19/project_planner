@@ -15,6 +15,7 @@ class Project(models.Model):
         ('in_progress', 'In Progress'),
         ('completed', 'Completed'),
         ('on_hold', 'On Hold'),
+        ('overdue', 'Overdue'),
     ]
 
     # Core fields
@@ -93,6 +94,10 @@ class ProjectMembership(models.Model):
     Represents the membership of a user in a project.
     Tracks the user's tasks and completion statistics within the project.
     """
+    ROLE_CHOICES = [
+        ('owner', 'Owner'),
+        ('member', 'Member'),
+    ]
     project = models.ForeignKey(
         Project, 
         on_delete=models.CASCADE, 
@@ -108,7 +113,11 @@ class ProjectMembership(models.Model):
     # Task tracking fields
     total_tasks = models.PositiveIntegerField(default=0)  # Total tasks assigned to the user in this project
     completed_tasks = models.PositiveIntegerField(default=0)  # Total tasks completed by the user in this project
-
+    role = models.CharField(
+        max_length=10,
+        choices=ROLE_CHOICES,
+        default='member'
+    )  # Role of the user in the project
     # Custom manager
     objects = ProjectMembershipManager()
 
@@ -123,9 +132,9 @@ class ProjectMembership(models.Model):
         Updates the total and completed tasks for this user in the project.
         This should be called whenever tasks are assigned or their status changes.
         """
-        self.total_tasks = self.project.tasks.filter(taskassignments__user=self.user).count()
+        self.total_tasks = self.project.tasks.filter(assignments__user=self.user).count()
         self.completed_tasks = self.project.tasks.filter(
-            taskassignments__user=self.user, 
+            assignments__user=self.user, 
             status='completed'
         ).count()
         self.save()

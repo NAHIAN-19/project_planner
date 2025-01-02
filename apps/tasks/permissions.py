@@ -28,4 +28,4 @@ class IsProjectOwnerOrReadOnly(BasePermission):
     Custom permission to allow only project owners to modify status change requests.
     """
     def has_object_permission(self, request, view, obj):
-        return request.method in permissions.SAFE_METHODS or obj.task.project.owner == request.user
+        return request.method in permissions.SAFE_METHODS or obj.project.owner == request.user

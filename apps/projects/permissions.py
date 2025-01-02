@@ -6,3 +6,10 @@ class IsProjectOwnerOrReadOnly(permissions.BasePermission):
     """
     def has_object_permission(self, request, view, obj):
         return request.method in permissions.SAFE_METHODS or obj.project.owner == request.user
+    
+class IsProjectOwner(permissions.BasePermission):
+    """
+    Custom permission to allow only project owners to modify tasks.
+    """
+    def has_permission(self, request, view, obj):
+        return obj.owner == request.user

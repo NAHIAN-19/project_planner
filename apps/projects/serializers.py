@@ -1,39 +1,48 @@
-# Local imports
+# local imports
 from apps.projects.models import Project, ProjectMembership
+from apps.users.serializers import CustomUserSerializer, DetailedUserSerializer
 # django imports
 from django.contrib.auth import get_user_model
+from django.utils import timezone
+from django.urls import reverse
 # third-party imports
 from rest_framework import serializers
 
-# Get the custom User model
+
+
 User = get_user_model()
 
-class CustomUserSerializer(serializers.ModelSerializer):
-    """
-    Serializer for the User model to expose the user details.
-    """
-    class Meta:
-        model = User
-        fields = ['id', 'username', 'email', 'last_login']
 
+# Serializer for ProjectMembership
 class ProjectMembershipSerializer(serializers.ModelSerializer):
-    """
-    Serializer for the ProjectMembership model, exposing details about 
-    the user and their project membership (joined date, total tasks, and completed tasks).
-    """
-    user = CustomUserSerializer(read_only=True)
+    user = serializers.CharField(source='user.username')  # Display username instead of the full user object
+    membership_url = serializers.SerializerMethodField()  # URL for the membership detail
+
+    class Meta:
+        model = ProjectMembership
+        fields = ['id', 'user', 'joined_at', 'membership_url']
+
+    def get_membership_url(self, obj):
+        """Build absolute URL for membership detail."""
+        request = self.context.get('request')
+        if request is not None:
+            return request.build_absolute_uri(reverse('project-membership-detail', kwargs={'id': obj.id}))
+        return None
+
+
+# Detailed serializer for ProjectMembership with user details
+class DetailedProjectMembershipSerializer(serializers.ModelSerializer):
+    user = DetailedUserSerializer(read_only=True)  # Use a detailed user serializer for richer information
 
     class Meta:
         model = ProjectMembership
         fields = ['user', 'joined_at', 'total_tasks', 'completed_tasks']
 
 
+# Serializer for detailed Project information
 class ProjectSerializer(serializers.ModelSerializer):
-    """
-    Serializer for the Project model, exposing project details and related memberships.
-    """
-    owner = CustomUserSerializer(read_only=True)
-    members = ProjectMembershipSerializer(source='memberships', many=True, read_only=True)
+    owner = CustomUserSerializer(read_only=True)  # Display project owner's information
+    members = ProjectMembershipSerializer(source='memberships', many=True, read_only=True)  # Serialize project members
 
     class Meta:
         model = Project
@@ -45,15 +54,32 @@ class ProjectSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'owner', 'created_at', 'total_tasks', 'total_member_count']
 
 
+# Serializer for listing projects with minimal fields
+class ProjectListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Project
+        fields = ['id', 'name', 'description', 'status', 'due_date']
+
+
+# Serializer for creating a new project
 class ProjectCreateSerializer(serializers.ModelSerializer):
-    """
-    Serializer for creating a new project. Handles adding members to the project.
-    """
-    members = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), many=True, write_only=True)
+    members = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), many=True, write_only=True, required=False)
 
     class Meta:
         model = Project
-        fields = ['name', 'description', 'due_date', 'members']
+        fields = ['name', 'description', 'due_date', 'members', 'status']
+
+    def validate_due_date(self, value):
+        """Ensure due date is not in the past."""
+        if value and value.date() < timezone.now().date():
+            raise serializers.ValidationError("Due date cannot be in the past.")
+        return value
+
+    def validate_members(self, value):
+        """Limit the number of members in a project."""
+        if len(value) > 10:
+            raise serializers.ValidationError("A project cannot have more than 10 members.")
+        return value
 
     def create(self, validated_data):
         """
@@ -61,66 +87,122 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
         """
         members = validated_data.pop('members', [])
         owner = self.context['request'].user
-        # if owner id is in validated_data, remove it
+
+        # Remove 'owner' field if accidentally included
         if 'owner' in validated_data:
             validated_data.pop('owner')
-        # Create the project and assign the owner
+
+        # Create the project with the authenticated user as owner
         project = Project.objects.create(**validated_data, owner=owner)
 
-        # Add the owner as a member
+        # Automatically add the owner as a member
         ProjectMembership.objects.create(project=project, user=owner)
 
-        # Add other members if not already the owner
+        # Validate plan restrictions for adding members
+        subscription = owner.subscription
+        plan = subscription.plan if subscription else None
+        if plan and plan.max_members_per_project > 1:
+            if len(members) > plan.max_members_per_project:
+                raise serializers.ValidationError("You have exceeded the maximum number of members allowed by your plan.")
+
+        # Add other members, ensuring no duplication of owner
         for user in members:
             if user != owner:
                 ProjectMembership.objects.create(project=project, user=user)
 
+        # Save members to context for additional processing if needed
+        self.context['members'] = members
         return project
 
     def to_representation(self, instance):
-        """
-        Override to use the ProjectSerializer for representation after creation.
-        """
-        return ProjectSerializer(instance).data
+        """Custom representation of the project."""
+        return {
+            'id': instance.id,
+            'name': instance.name,
+            'description': instance.description,
+            'due_date': instance.due_date,
+            'owner': CustomUserSerializer(instance.owner).data,
+            'members': ProjectMembershipSerializer(instance.memberships.all(), many=True).data
+        }
 
 
+# Serializer for updating an existing project
 class ProjectUpdateSerializer(serializers.ModelSerializer):
-    """
-    Serializer for updating project details. Optionally updates the project's members.
-    """
     members = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), many=True, required=False)
 
     class Meta:
         model = Project
         fields = ['name', 'description', 'due_date', 'status', 'members']
 
-    def update(self, instance, validated_data):
-        """
-        Update the project fields and manage membership changes (add or remove members).
-        """
-        members = validated_data.pop('members', None)
+    def validate_due_date(self, value):
+        """Ensure due date is not in the past."""
+        if value and value < timezone.now().date():
+            raise serializers.ValidationError("Due date cannot be in the past.")
+        return value
 
-        # Update the project fields
+    def validate_members(self, value):
+        """Ensure members list respects subscription limits and removes duplicates."""
+        value = list(set(value))  # Remove duplicate entries
+        user = self.context['request'].user
+        subscription = user.subscription
+        plan = subscription.plan if subscription else None
+        if plan and plan.max_members_per_project > 1:
+            if len(value) > plan.max_members_per_project:
+                raise serializers.ValidationError("You have exceeded the maximum number of members allowed by your plan.")
+        return value
+
+    def update(self, instance, validated_data):
+        """Update project and manage membership changes."""
+        members = validated_data.pop('members', None)
+        user = self.context['request'].user
+        subscription = user.subscription
+        plan = subscription.plan if subscription else None
+        members = list(set(members))  # Ensure unique member entries
+
+        # Validate membership count against plan limits
+        if plan and plan.max_members_per_project > 1:
+            if len(members) > plan.max_members_per_project:
+                raise serializers.ValidationError("You have exceeded the maximum number of members allowed by your plan.")
+
+        # Track membership changes
+        new_members = []
+        removed_members = []
+
+        # Update other fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
-        # If members data is provided, update the members
         if members is not None:
-            current_members = set(instance.members.all())
-            new_members = set(members)
+            # Determine members to add and remove
+            current_members = set(instance.memberships.values_list('user', flat=True))
+            new_members_set = set(member.id for member in members)
+            
+            # Ensure the owner remains a member
+            if instance.owner.id not in new_members_set:
+                raise serializers.ValidationError("Owner cannot be removed from the project.")
 
-            # Ensure the owner is not removed from the project
-            if instance.owner not in new_members:
-                new_members.add(instance.owner)
+            # Calculate members to add and remove
+            to_remove = current_members - new_members_set
+            to_add = new_members_set - current_members
 
-            # Remove members who are no longer part of the project
-            to_remove = current_members - new_members
-            ProjectMembership.objects.filter(project=instance, user__in=to_remove).delete()
+            # Remove members no longer in the project
+            if to_remove:
+                ProjectMembership.objects.filter(project=instance, user__in=to_remove).delete()
+                removed_members = list(to_remove)
 
-            # Add new members to the project
-            to_add = new_members - current_members
-            for user in to_add:
-                ProjectMembership.objects.create(project=instance, user=user)
+            # Add new members
+            if to_add:
+                for user_id in to_add:
+                    ProjectMembership.objects.create(project=instance, user_id=user_id)
+                new_members = list(to_add)
+
+            # Save changes to context for potential use
+            self.context['new_members'] = User.objects.filter(id__in=new_members)
+            self.context['removed_members'] = User.objects.filter(id__in=removed_members)
 
         return instance
+
+    def to_representation(self, instance):
+        """Use the detailed project serializer for output."""
+        return ProjectSerializer(instance, context=self.context).data

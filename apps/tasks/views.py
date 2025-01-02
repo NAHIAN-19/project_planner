@@ -1,21 +1,23 @@
 from typing import Any
 
 # Local imports
-from apps.projects.models import Project
-from apps.tasks.models import (
-    Task, TaskAssignment, Comment, StatusChangeRequest
-)
+from apps.projects.models import Project, ProjectMembership
+from apps.tasks.models import Task, TaskAssignment, Comment, StatusChangeRequest
 from apps.tasks.serializers import (
-    TaskCreateSerializer, TaskSerializer, TaskUpdateSerializer, StatusChangeRequestSerializer,
-    CommentCreateSerializer, CommentListSerializer, CommentDetailSerializer, TaskStatusChangeSerializer
+    TaskCreateSerializer, TaskListSerializer, TaskDetailSerializer,
+    TaskUpdateSerializer, StatusChangeRequestSerializer,CommentCreateSerializer,
+    CommentListSerializer, CommentDetailSerializer, TaskStatusChangeSerializer,
+    StatusChangeActionSerializer
 )
 from apps.tasks.permissions import IsTaskAssigneeOrProjectMember, IsProjectOwnerOrReadOnly
-
+from apps.notifications.utils import send_real_time_notification
 # Django imports
-from django_filters.rest_framework import DjangoFilterBackend
+from django.contrib.contenttypes.models import ContentType
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
-
+from django.urls import reverse
 # Third-party imports
+from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import (
     extend_schema, OpenApiParameter, OpenApiExample, OpenApiTypes
 )
@@ -24,17 +26,14 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.response import Response
-from rest_framework.exceptions import PermissionDenied, NotFound
+from rest_framework.exceptions import PermissionDenied, NotFound, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.serializers import Serializer
-
 # Utility for standardized responses
 def standardized_response(
-    status_code: int,
-    status_message: str,
-    message: str,
-    data: dict | None = None
+    status_code: int,status_message: str,
+    message: str,data: dict | None = None
 ) -> Response:
     """
     Utility to create standardized API responses.
@@ -47,10 +46,6 @@ def standardized_response(
         response["data"] = data
     return Response(response, status=status_code)
 
-class StandardResultsSetPagination(PageNumberPagination):
-    page_size = 10
-    page_size_query_param = 'page_size'
-    max_page_size = 100
 
 #=================#
 # Task Views      #
@@ -62,24 +57,96 @@ class TaskListCreateView(ListCreateAPIView):
     """
     permission_classes = [IsAuthenticated]
     throttle_classes = [UserRateThrottle]
-    pagination_class = StandardResultsSetPagination
-    queryset = Task.objects.all()
-    serializer_class = TaskCreateSerializer  # Use TaskCreateSerializer for creation
+    serializer_class = TaskCreateSerializer
 
     filter_backends = (DjangoFilterBackend, filters.OrderingFilter, filters.SearchFilter)
-    filterset_fields = ['status', 'due_date', 'assigned_by', 'project', 'need_approval']  # Fields to filter by
-    search_fields = ['name', 'description']  # Fields to search within (full-text search)
-    ordering_fields = ['due_date', 'status', 'created_at']  # Allow ordering by these fields
-    ordering = ['-due_date']  # Default ordering by due_date descending
+    filterset_fields = {
+        'status': ['exact'],
+        'due_date': ['exact', 'gte', 'lte'],
+        'assigned_by': ['exact'],
+        'project': ['exact'],
+        'need_approval': ['exact'],
+        'created_at': ['gte', 'lte'],
+    }
+    search_fields = ['name', 'description']
+    ordering_fields = ['due_date', 'status', 'created_at', 'total_assignees']
+    ordering = ['-due_date']
 
+    def get_queryset(self):
+        """
+        Return tasks that the user is associated with either as:
+        - An assignee
+        - The project owner
+        """
+        user = self.request.user
+        
+        queryset = Task.objects.select_related(
+            'project',
+            'project__owner',
+            'assigned_by'
+        ).prefetch_related(
+            'assignments__user'
+        ).filter(
+            Q(assignments__user=user) |  # Tasks assigned to user
+            Q(project__owner=user)     # Tasks in projects owned by user
+        ).distinct()
+
+        # Additional filtering options
+        project_id = self.request.query_params.get('project_id')
+        if project_id:
+            queryset = queryset.filter(project_id=project_id)
+
+        assignee_id = self.request.query_params.get('assignee_id')
+        if assignee_id:
+            queryset = queryset.filter(assignments__user_id=assignee_id)
+
+        priority = self.request.query_params.get('priority')
+        if priority:
+            queryset = queryset.filter(priority=priority)
+
+        return queryset
+    
     def get_serializer_class(self):
         """
         Override to return the appropriate serializer class based on the request method.
         """
         if self.request.method == 'GET':
-            return TaskSerializer  # Use TaskSerializer for GET requests (task details view)
-        return TaskCreateSerializer  # Use TaskCreateSerializer for POST requests (task creation)
+            return TaskListSerializer 
+        return TaskCreateSerializer
+    
+    
+    def perform_create(self, serializer):
+        project = serializer.validated_data['project']
+        if not ProjectMembership.objects.filter(project=project, user=self.request.user).exists():
+            return standardized_response(
+                status_code=403,
+                status_message="failure",
+                message="You do not have permission to create tasks for this project."
+            )
+        task = serializer.save(assigned_by=self.request.user)
+        assignees = serializer.validated_data.get('assignees', [])
+        task_content_type = ContentType.objects.get_for_model(Task)
 
+
+        # Send notifications to assignees
+        for assignee in assignees:
+            send_real_time_notification(
+                user=assignee,
+                message={
+                    "title": "New Task Assigned",
+                    "body": f"You have been assigned to the task '{task.name}'.",
+                    "url": f"/tasks/{task.id}/"
+                },
+                notification_type="task",
+                content_type=task_content_type.id,
+                object_id=task.id
+            )
+        return standardized_response(
+            status_code=201,
+            status_message="success",
+            message="Task created successfully.",
+            data={"task_id": task.id}
+        )
     @extend_schema(
         summary="List and Create Tasks",
         description="Retrieve a list of tasks with filters or create a new task.",
@@ -94,8 +161,8 @@ class TaskListCreateView(ListCreateAPIView):
         ],
         request=TaskCreateSerializer,
         responses={
-            200: TaskSerializer(many=True),
-            201: TaskSerializer,
+            200: TaskListSerializer(many=True),
+            201: TaskListSerializer,
             400: OpenApiExample(
                 'Validation Error',
                 value={"detail": "Invalid input."},
@@ -109,14 +176,58 @@ class TaskListCreateView(ListCreateAPIView):
         },
     )
     def post(self, request, *args, **kwargs):
-        return super().post(request, *args, **kwargs)
+        try:
+            response = super().post(request, *args, **kwargs)
+            return standardized_response(
+                status_code=response.status_code,
+                status_message="success",
+                message="Task created successfully." if response.status_code == 201 else "Tasks retrieved successfully.",
+                data=response.data
+            )
+        except ValidationError as e:
+            # Format validation errors into a clear structure
+            error_messages = {}
+            if hasattr(e.detail, 'items'):  # Handle dictionary of errors
+                for field, errors in e.detail.items():
+                    if isinstance(errors, list):
+                        error_messages[field] = errors[0]
+                    else:
+                        error_messages[field] = str(errors)
+            else:  # Handle list of errors or single error
+                error_messages['detail'] = e.detail[0] if isinstance(e.detail, list) else str(e.detail)
+
+            return standardized_response(
+                status_code=400,
+                status_message="validation_error",
+                message="Validation failed",
+                data={"errors": error_messages}
+            )
+        except PermissionDenied as e:
+            return standardized_response(
+                status_code=403,
+                status_message="permission_denied", 
+                message="You don't have permission to create tasks in this project."
+            )
+        except Project.DoesNotExist:
+            return standardized_response(
+                status_code=404,
+                status_message="not_found",
+                message="The specified project does not exist."
+            )
+        except Exception as e:
+            return standardized_response(
+                status_code=500,
+                status_message="server_error",
+                message="Failed to process task creation. Please try again."
+            )
+
 
 class TaskRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView):
     """
     API view to retrieve, update, or delete a specific task.
     """
     queryset = Task.objects.all()
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsProjectOwnerOrReadOnly]
     throttle_classes = [UserRateThrottle]
     serializer_class = TaskUpdateSerializer
 
@@ -130,7 +241,7 @@ class TaskRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView):
         Use a different serializer for GET request to exclude certain fields.
         """
         if self.request.method == 'GET':
-            return TaskSerializer
+            return TaskDetailSerializer
         return TaskUpdateSerializer
 
     def get_queryset(self):
@@ -145,6 +256,12 @@ class TaskRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView):
             'assignments__user'            # Use prefetch_related for many-to-many relationships (task assignments)
         )
 
+        # Filter tasks so that only those assigned to the user (or project owner) are returned
+        user = self.request.user
+        queryset = queryset.filter(
+            Q(assignments__user=user) | Q(project__owner=user)
+        ).distinct()  # Ensure distinct tasks are returned in case of multiple assignees
+
         # Apply additional filtering to the queryset if needed
         status_filter = self.request.query_params.get('status', None)
         if status_filter:
@@ -153,67 +270,242 @@ class TaskRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView):
         return queryset
 
     @extend_schema(
-        summary="Retrieve, Update or Delete Task",
-        description="Retrieve task details, update them, or delete the task.",
+        summary="Retrieve Task Details",
+        description="Retrieve task details, including assignees, project information, and task status.",
         responses={
-            200: TaskSerializer,
-            204: None,
-            403: OpenApiExample(
-                'Forbidden',
-                value={"detail": "You do not have permission to perform this action."},
+            200: TaskDetailSerializer,
+            404: OpenApiExample(
+                'Task Not Found',
+                value={"detail": "Task not found."},
                 response_only=True,
             ),
         }
     )
     def get(self, request, *args, **kwargs):
-        return super().get(request, *args, **kwargs)
+        task = self.get_object()
+        serializer = TaskDetailSerializer(task, context={'request': request})
+        return standardized_response(
+            status_code=status.HTTP_200_OK,
+            status_message="success",
+            message="Task details retrieved successfully.",
+            data=serializer.data
+        )
+
+    @extend_schema(
+        summary="Update Task",
+        description="Update task details, such as assignees, status, or other fields.",
+        request=TaskUpdateSerializer,
+        responses={
+            200: TaskDetailSerializer,
+            400: OpenApiExample(
+                'Bad Request',
+                value={"status": "error", "message": "Invalid input.", "errors": {}},
+                response_only=True,
+            ),
+            403: OpenApiExample(
+                'Forbidden',
+                value={"status": "error", "message": "You do not have permission to perform this action."},
+                response_only=True,
+            ),
+        }
+    )
+    def put(self, request, *args, **kwargs):
+        try:
+            response =  super().put(request, *args, **kwargs)
+            return standardized_response(
+                status_code=response.status_code,
+                status_message="success" if response.status_code == status.HTTP_200_OK else "error",
+                message="Task updated successfully." if response.status_code == status.HTTP_200_OK else "Failed to update task.",
+                data=response.data
+            )
+        except ValidationError as e:
+            error_messages = {}
+            if hasattr(e.detail, 'items'):
+                for field, errors in e.detail.items():
+                    error_messages[field] = errors[0] if isinstance(errors, list) else str(errors)
+            else:
+                error_messages['detail'] = e.detail[0] if isinstance(e.detail, list) else str(e.detail)
+
+            return standardized_response(
+                status_code=400,
+                status_message="validation_error",
+                message="Validation failed",
+                data={"errors": error_messages}
+            )
+        except PermissionDenied as e:
+            return standardized_response(
+                status_code=403,
+                status_message="permission_denied", 
+                message="You don't have permission to update this task."
+            )
+        except Task.DoesNotExist:
+            return standardized_response(
+                status_code=404,
+                status_message="not_found",
+                message="Task not found."
+            )
+        except Exception as e:
+            return standardized_response(
+                status_code=500,
+                status_message="server_error",
+                message="Failed to process task update. Please try again."
+            )
 
     @extend_schema(
         summary="Partially Update Task",
         description="Partially update task details.",
         request=TaskUpdateSerializer,
         responses={
-            200: TaskSerializer,
+            200: TaskDetailSerializer,
             400: OpenApiExample(
-                'Validation Error',
-                value={"detail": "Invalid input."},
+                'Bad Request',
+                value={"status": "error", "message": "Invalid input.", "errors": {}},
+                response_only=True,
+            ),
+            403: OpenApiExample(
+                'Forbidden',
+                value={"status": "error", "message": "You do not have permission to perform this action."},
                 response_only=True,
             ),
         }
     )
     def patch(self, request, *args, **kwargs):
-        return super().patch(request, *args, **kwargs)
+        try:
+            task = Task.objects.get(id=pk)
+            
+            if task.need_approval:
+                raise PermissionDenied("Task requires approval to change status.")
+            
+            if not TaskAssignment.objects.filter(task=task, user=request.user).exists():
+                raise PermissionDenied("You must be assigned to the task to change its status.")
+
+            serializer = TaskStatusChangeSerializer(task, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return standardized_response(
+                    status_code=200,
+                    status_message="success",
+                    message="Task status updated successfully.",
+                    data=serializer.data
+                )
+            return standardized_response(
+                status_code=400,
+                status_message="validation_error",
+                message="Invalid status value.",
+                data={"errors": serializer.errors}
+            )
+        except Task.DoesNotExist:
+            return standardized_response(
+                status_code=404,
+                status_message="not_found",
+                message="Task not found."
+            )
+        except PermissionDenied as e:
+            return standardized_response(
+                status_code=403,
+                status_message="permission_denied",
+                message=str(e)
+            )
+        except Exception as e:
+            return standardized_response(
+                status_code=500,
+                status_message="server_error",
+                message="Failed to update task status."
+            )
 
     @extend_schema(
         summary="Delete Task",
-        description="Delete a specific task.",
+        description="Delete a specific task and notify assignees.",
         responses={
-            204: None,
+            204: OpenApiExample(
+                'Task Deleted',
+                value={"detail": "Task has been deleted successfully."},
+                response_only=True,
+            ),
             403: OpenApiExample(
                 'Forbidden',
                 value={"detail": "You do not have permission to perform this action."},
                 response_only=True,
             ),
+            404: OpenApiExample(
+                'Not Found',
+                value={"detail": "Task not found."},
+                response_only=True,
+            ),
         }
     )
     def delete(self, request, *args, **kwargs):
-        return super().delete(request, *args, **kwargs)
+        task = self.get_object()
+
+        # Check if the current user is allowed to delete the task (project owner)
+        if request.user != task.project.owner:
+            return Response({"detail": "You do not have permission to perform this action."}, status=status.HTTP_403_FORBIDDEN)
+
+        self.perform_destroy(task)
+        return Response({"detail": "Task has been deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
 
     def perform_update(self, serializer):
         """
         Ensure that only the project owner can update the task.
         """
         task = serializer.instance
-        if self.request.user != task.project.owner:
+        request = self.request
+        if request.user != task.project.owner:
             raise PermissionDenied("Only the project owner can update this task.")
-        serializer.save()
+        
+        updated_task = serializer.save()
+        add_assignees = serializer.context.get('new_assignees', [])
+        remove_assignees = serializer.context.get('removed_assignees', [])
+        print(remove_assignees)
+        task_content_type = ContentType.objects.get_for_model(Task)
+
+        # Notify users added to the task
+        for assignee in add_assignees:
+            send_real_time_notification(
+                user=assignee,
+                message={
+                    "title": "Task Assigned",
+                    "body": f"You have been assigned to the task '{updated_task.name}'.",
+                    "url": request.build_absolute_uri(reverse('task-retrieve-update-destroy', kwargs={'pk': updated_task.id})),
+                },
+                notification_type="task",
+                content_type=task_content_type.id,
+                object_id=updated_task.id
+            )
+        
+        # Notify users removed from the task
+        for assignee in remove_assignees:
+            send_real_time_notification(
+                user=assignee,
+                message={
+                    "title": "Task Unassigned",
+                    "body": f"You have been unassigned from the task '{updated_task.name}'.",
+                    "url": request.build_absolute_uri(reverse('task-list-create')),
+                },
+                notification_type="task",
+                content_type=task_content_type.id,
+                object_id=updated_task.id
+            )
 
     def perform_destroy(self, instance):
         """
         Delete the task and its associated task assignments.
         """
-        TaskAssignment.objects.filter(task=instance).delete()  # Delete all task assignments first
-        instance.delete()  # Now delete the task
+        task_content_type = ContentType.objects.get_for_model(Task)
+        for assignee in instance.assignments.all():
+            send_real_time_notification.delay(
+                user_id=assignee.id,
+                message={
+                    "title": "Task Deleted",
+                    "body": f"The task '{instance.name}' has been deleted.",
+                    "url": "/tasks/"
+                },
+                notification_type="task",
+                content_type=task_content_type.id,
+                object_id=instance.id
+            )
+        TaskAssignment.objects.filter(task=instance).delete()
+        instance.delete()
         
 class TaskStatusChangeView(APIView):
     """
@@ -274,6 +566,19 @@ class TaskStatusChangeView(APIView):
         serializer = TaskStatusChangeSerializer(task, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
+            # Send notification to all assignees about the status change
+            for assignee in task.assignees.all():
+                send_real_time_notification.delay(
+                    user_id=assignee.id,
+                    message={
+                        "title": "Task Status Updated",
+                        "body": f"The status of the task '{task.title}' has been updated to '{serializer.validated_data['status']}'.",
+                        "url": f"/tasks/{task.id}/"
+                    },
+                    notification_type="task",
+                    content_type=ContentType.objects.get_for_model(Task).id,
+                    object_id=task.id
+                )
             return Response({"detail": "Task status updated successfully."}, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -283,7 +588,7 @@ class CommentListCreateView(ListCreateAPIView):
     View to list and create comments for tasks.
     """
     permission_classes = [IsAuthenticated, IsTaskAssigneeOrProjectMember]
-    pagination_class = StandardResultsSetPagination
+    
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['task', 'author']
     ordering_fields = ['created_at', 'updated_at']
@@ -343,7 +648,45 @@ class CommentListCreateView(ListCreateAPIView):
         }
     )
     def post(self, request, *args, **kwargs):
-        return super().post(request, *args, **kwargs)
+        """
+        Handle POST requests to create a new comment and send notifications for mentions or replies.
+        """
+        response = super().post(request, *args, **kwargs)
+        if response.status_code == 201:
+            comment = Comment.objects.get(id=response.data['id'])
+
+            # Send notifications to mentioned users
+            mentioned_users = comment.mentioned_users.all()
+            for user in mentioned_users:
+                send_real_time_notification(
+                    user=user,
+                    message={
+                        "title": "You were mentioned in a comment",
+                        "body": f"{request.user.username} mentioned you in a comment: '{comment.content}'",
+                        "url": f"/tasks/comments/{comment.id}/"
+                    },
+                    notification_type="task",
+                    content_type=ContentType.objects.get_for_model(Comment).id,
+                    object_id=comment.id
+                )
+
+            # Send notification to the parent comment author (if it's a reply)
+            if comment.parent:
+                parent_author = comment.parent.author
+                if parent_author != request.user:  # Avoid self-notification
+                    send_real_time_notification.delay(
+                        user=parent_author,
+                        message={
+                            "title": "New Reply to Your Comment",
+                            "body": f"{request.user.username} replied to your comment: '{comment.content}'",
+                            "url": f"/tasks/comments/{comment.parent.id}/"
+                        },
+                        notification_type="task",
+                        content_type=ContentType.objects.get_for_model(Comment).id,
+                        object_id=comment.parent.id
+                    )
+
+        return response
 
 class CommentDetailView(RetrieveUpdateDestroyAPIView):
     """
@@ -385,11 +728,35 @@ class CommentDetailView(RetrieveUpdateDestroyAPIView):
             ),
         }
     )
-    def put(self, request: Any, *args: Any, **kwargs: Any) -> Response:
+    def put(self, request, *args, **kwargs):
         """
-        Handle PUT request to update the comment.
+        Handle PUT request to update the comment and send notifications for new mentions.
         """
-        return super().put(request, *args, **kwargs)
+        comment = self.get_object()
+        original_mentioned_users = set(comment.mentioned_users.all())
+        
+        response = super().put(request, *args, **kwargs)
+
+        if response.status_code == 200:
+            updated_comment = self.get_object()
+            updated_mentioned_users = set(updated_comment.mentioned_users.all())
+
+            # Determine newly mentioned users
+            new_mentions = updated_mentioned_users - original_mentioned_users
+            for user in new_mentions:
+                send_real_time_notification(
+                    user=user,
+                    message={
+                        "title": "You were mentioned in a comment",
+                        "body": f"{request.user.username} mentioned you in an updated comment: '{updated_comment.content}'",
+                        "url": f"/tasks/comments/{updated_comment.id}/"
+                    },
+                    notification_type="task",
+                    content_type=ContentType.objects.get_for_model(Comment).id,
+                    object_id=updated_comment.id
+                )
+
+        return response
 
     @extend_schema(
         summary="Delete a Comment",
@@ -416,7 +783,7 @@ class StatusChangeRequestListCreateView(ListCreateAPIView):
     queryset = StatusChangeRequest.objects.all()
     serializer_class = StatusChangeRequestSerializer
     permission_classes = [IsAuthenticated, IsProjectOwnerOrReadOnly]
-    pagination_class = StandardResultsSetPagination
+    
     throttle_classes = [UserRateThrottle]
 
     @extend_schema(
@@ -439,34 +806,27 @@ class StatusChangeRequestListCreateView(ListCreateAPIView):
         """
         Optionally filter status change requests by task or project.
         """
-        queryset = StatusChangeRequest.objects.all()
+        queryset = StatusChangeRequest.objects.select_related('task', 'user')
         task_id = self.request.query_params.get('task_id')
         project_id = self.request.query_params.get('project_id')
 
         if task_id:
-            try:
-                task = Task.objects.get(id=task_id)
-            except Task.DoesNotExist:
-                raise NotFound(detail="Task not found.")
-
             # Check if the user is assigned to the task
-            if not task.assignments.filter(user=self.request.user).exists():
+            if not Task.objects.filter(
+                id=task_id,
+                assignments__user=self.request.user
+            ).exists():
                 raise PermissionDenied(detail="You are not assigned to this task.")
-
-            queryset = queryset.filter(task_id=task_id)
+            queryset = queryset.filter(task__id=task_id)
 
         if project_id:
-            try:
-                project = Project.objects.get(id=project_id)
-            except Project.DoesNotExist:
-                raise NotFound(detail="Project not found.")
-
-            # Check if the user is part of the project
-            if not project.memberships.filter(user=self.request.user).exists() and project.owner != self.request.user:
+            # Check if the user is part of the project or the owner
+            if not Project.objects.filter(
+                Q(id=project_id) & 
+                (Q(owner=self.request.user) | Q(memberships__user=self.request.user))
+            ).exists():
                 raise PermissionDenied(detail="You are not a member of this project or the owner.")
-
-            tasks = project.tasks.all()
-            queryset = queryset.filter(task__in=tasks)
+            queryset = queryset.filter(task__project__id=project_id)
 
         return queryset
 
@@ -487,8 +847,18 @@ class StatusChangeRequestListCreateView(ListCreateAPIView):
         """
         Automatically set the user making the request as the creator.
         """
-        serializer.save(user=self.request.user)
-
+        status_request = serializer.save(user=self.request.user)
+        send_real_time_notification.delay(
+            user=status_request.assigned_by,
+            message={
+                "title": "Status Change Request",
+                "body": f"'{self.request.user}' created a status change request for task: '{status_request.task.title}'.",
+                "url": f"/tasks/status/change/requests/{status_request.id}/"
+            },
+            notification_type="task",
+            content_type=ContentType.objects.get_for_model(StatusChangeRequest).id,
+            object_id=status_request.id
+        )
 
 class StatusChangeRequestRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView):
     """
@@ -550,19 +920,11 @@ class StatusChangeRequestAcceptRejectView(APIView):
     API view for accepting or rejecting a status change request.
     """
     permission_classes = [IsAuthenticated, IsProjectOwnerOrReadOnly]
-
+    serializer_class = StatusChangeActionSerializer
     @extend_schema(
         summary="Accept/Reject Status Change Request",
-        description=(
-            "Approve or reject a pending status change request by specifying the action ('accept' or 'reject'). "
-            "Automatically updates the task status if accepted."
-        ),
-        request=OpenApiParameter(
-            "action",
-            OpenApiTypes.STR,
-            enum=["accept", "reject"],
-            description="Action to perform ('accept' or 'reject').",
-        ),
+        description="Approve or reject a pending status change request.",
+        request=StatusChangeActionSerializer,
         responses={
             200: StatusChangeRequestSerializer,
             400: OpenApiExample(
@@ -577,36 +939,73 @@ class StatusChangeRequestAcceptRejectView(APIView):
             ),
         }
     )
+
     def post(self, request, pk):
         try:
-            # Retrieve the status change request by ID
             status_change_request = StatusChangeRequest.objects.get(id=pk)
+            action = request.data.get('action')
+
+            if action not in ['accept', 'reject']:
+                return standardized_response(
+                    status_code=400,
+                    status_message="validation_error",
+                    message="Invalid action. Must be 'accept' or 'reject'."
+                )
+
+            if status_change_request.status != 'pending':
+                return standardized_response(
+                    status_code=400,
+                    status_message="validation_error",
+                    message="This status change request is not pending."
+                )
+
+            # Process the action
+            if action == 'accept':
+                status_change_request.status = 'approved'
+                status_change_request.task.status = 'completed'
+                status_change_request.approved_by = request.user
+                status_change_request.task.save()
+            else:
+                status_change_request.status = 'rejected'
+
+            status_change_request.save()
+            request = self.request
+            # Send notification
+            send_real_time_notification(
+                user=status_change_request.user,
+                message={
+                    "title": "Status Change Request Update",
+                    "body": f"Your status change request for '{status_change_request.task.name}' has been '{action}'ed.",
+                    "url": request.build_absolute_uri(reverse('accept-reject-status-change-request', kwargs={'pk': status_change_request.id}))
+                },
+                notification_type="task",
+                content_type=ContentType.objects.get_for_model(StatusChangeRequest).id,
+                object_id=status_change_request.id
+            )
+
+            serializer = StatusChangeRequestSerializer(status_change_request)
+            return standardized_response(
+                status_code=200,
+                status_message="success",
+                message=f"Status change request {action}ed successfully.",
+                data=serializer.data
+            )
+
         except StatusChangeRequest.DoesNotExist:
-            raise NotFound(detail="Status change request not found.")
-
-        # Get the action (accept or reject)
-        action = request.data.get('action')
-
-        if action not in ['accept', 'reject']:
-            return Response({"detail": "Invalid action. Must be 'accept' or 'reject'."}, status=status.HTTP_400_BAD_REQUEST)
-
-        if status_change_request.status != 'pending':
-            return Response({"detail": "This status change request is not pending."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Perform the accept or reject action
-        if action == 'accept':
-            # Mark the request as approved and update the task's status
-            status_change_request.status = 'approved'
-            status_change_request.task.status = 'completed'
-            status_change_request.approved_by = request.user
-            status_change_request.task.save()
-        elif action == 'reject':
-            # Mark the request as rejected
-            status_change_request.status = 'rejected'
-
-        # Save the status change request after the action
-        status_change_request.save()
-
-        # Serialize and return the updated status change request
-        serializer = StatusChangeRequestSerializer(status_change_request)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+            return standardized_response(
+                status_code=404,
+                status_message="not_found",
+                message="Status change request not found."
+            )
+        except PermissionDenied as e:
+            return standardized_response(
+                status_code=403,
+                status_message="permission_denied",
+                message=str(e)
+            )
+        except Exception as e:
+            return standardized_response(
+                status_code=500,
+                status_message="server_error",
+                message="Failed to process status change request."
+            )

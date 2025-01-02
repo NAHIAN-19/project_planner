@@ -1,11 +1,16 @@
-from rest_framework import serializers
+# local imports
 from apps.projects.models import Project, ProjectMembership
-from apps.projects.serializers import CustomUserSerializer
+from apps.projects.serializers import ProjectMembershipSerializer
 from apps.tasks.models import Task, TaskAssignment, Comment, StatusChangeRequest
+from apps.users.serializers import CustomUserSerializer, DetailedUserSerializer
+# django imports
 from django.contrib.auth import get_user_model
 from django.utils  import timezone
-from rest_framework.generics import ListCreateAPIView
+from django.urls import reverse
 from django.db import transaction
+# third-party imports
+from rest_framework import serializers
+from rest_framework.generics import ListCreateAPIView
 from rest_framework.exceptions import ValidationError
 User = get_user_model()
 
@@ -13,59 +18,66 @@ class TaskAssignmentSerializer(serializers.ModelSerializer):
     """
     Optimized serializer for task assignment details.
     """
-    user = serializers.PrimaryKeyRelatedField(queryset=User.objects.none())
-    username = serializers.CharField(source='user.username')
+    user = serializers.CharField(source='user.username')
+    membership_url = serializers.SerializerMethodField()
+
     class Meta:
         model = TaskAssignment
-        fields = ['user','username', 'assigned_at']
+        fields = ['id', 'user', 'assigned_at', 'membership_url']
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        task = self.context.get('task')
-        if task:
-            # Use select_related to optimize related lookups
-            project_memberships = task.project.memberships.select_related('user')
-            self.fields['user'].queryset = User.objects.filter(
-                id__in=project_memberships.values_list('user__id', flat=True)
+    def get_membership_url(self, obj):
+        """
+        Retrieve the membership URL from the ProjectMembershipSerializer.
+        """
+        request = self.context.get('request')
+        if not request:
+            print("Request not found in context.")  # Debugging
+            return None
+
+        # Directly get the URL for the membership if available
+        membership_url = None
+        try:
+            membership = ProjectMembership.objects.get(
+                project=obj.task.project,
+                user=obj.user
             )
+            membership_url = request.build_absolute_uri(reverse(
+                'project-membership-detail', kwargs={'id': membership.id}
+            ))
+        except ProjectMembership.DoesNotExist:
+            print("ProjectMembership does not exist.")  # Debugging
 
-class TaskSerializer(serializers.ModelSerializer):
-    assignments = TaskAssignmentSerializer(many=True, read_only=True)  # if we want to see the assignees
+        return membership_url
+
+
+
+class TaskListSerializer(serializers.ModelSerializer):
+    """
+    Serializer for listing tasks with minimal information.
+    """
+    class Meta:
+        model = Task
+        fields = ['id', 'name', 'due_date', 'status']
+        
+class TaskDetailSerializer(serializers.ModelSerializer):
+    """
+    Serializer for showing detailed information about a task.
+    """
+    assignments_ = TaskAssignmentSerializer(source='assignments', many=True, read_only=True)
     project = serializers.StringRelatedField()  # Show project name or use ProjectSerializer if details are needed
-    assigned_by = serializers.CharField(source='assigned_by.username', required=False)  # Show username for assigned_by
-    approved_by = serializers.CharField(source='approved_by.username', required=False)  # Show username for approved_by
-    # comments = serializers.SerializerMethodField()
+    assigned_by = serializers.StringRelatedField()  # Display the username of the assigned_by user
+    approved_by = serializers.StringRelatedField()  # Display the username of the approved_by user
 
     class Meta:
         model = Task
         fields = [
             'id', 'name', 'description', 'status', 'due_date', 'project',
-            'created_at', 'updated_at', 'total_assignees', #'comments',
-            'need_approval', 'approved_by', 'assigned_by', 'assignments',
+            'created_at', 'updated_at', 'total_assignees', 'need_approval',
+            'assigned_by', 'approved_by', 'assignments_'
         ]
-        read_only_fields = ['approved_by', 'assigned_by']
+        read_only_fields = ['id', 'approved_by', 'assigned_by']
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        
-        # Get the task instance from context
-        
-        # If this is a list view (e.g., TaskListCreateView), do not include assignments and show only ID for assigned_by and approved_by
-        if self.context.get('view') and isinstance(self.context['view'], ListCreateAPIView):
-            self.fields.pop('assignments')  # Remove assignments from list view
-            # self.fields.pop('comments')  # Remove comments from list view
-            self.fields['assigned_by'] = serializers.CharField(source='assigned_by.id', required=False)  # Just ID for assigned_by
-            self.fields['approved_by'] = serializers.CharField(source='approved_by.id', required=False)  # Just ID for approved_by
-        else:
-            # For detail views, show usernames
-            self.fields['assigned_by'] = serializers.CharField(source='assigned_by.username', required=False)
-            self.fields['approved_by'] = serializers.CharField(source='approved_by.username', required=False, allow_null=True)
 
-    # def get_comments(self, obj):
-    #     # Only get top-level comments
-    #     comments = obj.comments.filter(parent=None)
-    #     return CommentSerializer(comments, many=True, context=self.context).data
-    
 class TaskCreateSerializer(serializers.ModelSerializer):
     """
     Serializer for creating a new task with optional assignees.
@@ -79,68 +91,68 @@ class TaskCreateSerializer(serializers.ModelSerializer):
         model = Task
         fields = [
             'id', 'name', 'description', 'status', 'due_date', 'total_assignees',
-            'project', 'need_approval','assigned_by', 'assignees', 'approved_by'
+            'project', 'need_approval', 'assigned_by', 'assignees', 'approved_by'
         ]
-        read_only_fields = ['id', 'assigned_by', 'total_assignees', 'approved_by']  # Prevent users from manually modifying the assigned_by field
+        read_only_fields = ['id', 'assigned_by', 'total_assignees', 'approved_by']
 
     def validate_due_date(self, value):
-        """
-        Ensure the due_date is in the future.
-        """
-        if value and value < timezone.now():
-            raise serializers.ValidationError("Due date must be in the future.")
+        if value and value.date() < timezone.now().date():
+            raise serializers.ValidationError("Due date cannot be in the past.")
         return value
 
     def validate_assignees(self, value):
-        """
-        Ensure that assignees are members of the project.
-        """
-        project = self.initial_data.get('project')  # Get the project ID from the initial data
-        if project:
-            project_instance = Project.objects.get(id=project)
-            project_members = ProjectMembership.objects.filter(project=project_instance)
-            for assignee in value:
-                if assignee not in [member.user for member in project_members]:
-                    raise serializers.ValidationError(f"User {assignee} is not a member of the project.")
+        project_id = self.initial_data.get('project')
+        if not project_id:
+            raise serializers.ValidationError("Project is required.")
+        try:
+            project = Project.objects.get(id=project_id)
+        except Project.DoesNotExist:
+            raise serializers.ValidationError("Project does not exist.")
+
+        # Check membership directly through ProjectMembership model
+        project_members = project.memberships.values_list('user', flat=True)
+        for assignee in value:
+            if assignee.id not in project_members:
+                raise serializers.ValidationError(f"User {assignee} is not a member of the project.")
         return value
+
+
 
     def create(self, validated_data):
         """
         Create a new task, assign members (including project owner if not already in assignees), and update total_assignees.
         """
         assignees = validated_data.pop('assignees', [])
-        project = validated_data['project']
-
-        # Ensure the project owner is added to the assignees if not already included
-        project_owner = project.owner  # Assuming 'owner' is the field for the project owner
-
-
-        # Create the task
         task = Task.objects.create(**validated_data)
 
-        # Handle task assignments (including the project owner)
-        if assignees:
-            for user in assignees:
-                TaskAssignment.objects.create(task=task, user=user)
+        # Handle task assignments
+        for user in assignees:
+            TaskAssignment.objects.create(task=task, user=user)
 
-            # Update the total_assignees count
-            task.total_assignees = len(assignees)
-            task.save()
+        # Update total_assignees count
+        task.total_assignees = len(assignees)
+        task.save()
         return task
-    
+
     def to_representation(self, instance):
         """
         Customize the response to show assignees and total_assignees.
         """
-        # Standard representation
-        representation = super().to_representation(instance)
-
-        # Add the assignees' IDs if they are available
-        assignees = instance.assignments.all()
-        representation['assignees'] = [assignment.user.id for assignment in assignees]
-
-        # Return the updated representation
-        return representation
+        return {
+            'id': instance.id,
+            'name': instance.name,
+            'description': instance.description,
+            'status': instance.status,
+            'due_date': instance.due_date,
+            'project': instance.project.name,  # Assuming you have a 'name' field in the Project model
+            'total_assignees': instance.total_assignees,
+            'assigned_by': instance.assigned_by.username,
+            'assignees': TaskAssignmentSerializer(
+                instance.assignments.all(), 
+                many=True,
+                context=self.context
+            ).data,
+        }
     
 class TaskUpdateSerializer(serializers.ModelSerializer):
     """
@@ -155,13 +167,19 @@ class TaskUpdateSerializer(serializers.ModelSerializer):
             'need_approval', 'assignees', 'assigned_by', 'approved_by', 'total_assignees'
         ]
         read_only_fields = ['assigned_by', 'total_assignees', 'project']  # Prevent users from modifying these fields
-
+        
+    def validate_due_date(self, value):
+        if value and value < timezone.now().date():
+            raise serializers.ValidationError("Due date cannot be in the past.")
+        return value
+    
     def update(self, instance, validated_data):
         """
         Partially update task fields and manage assignees with optimized database queries.
         """
         assignees = validated_data.pop('assignees', None)
-
+        new_assignees = []
+        removed_assignees = []
         # Update task fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
@@ -170,37 +188,32 @@ class TaskUpdateSerializer(serializers.ModelSerializer):
         if assignees is not None:
             # Get the current assignees (users already assigned to the task)
             current_assignees = set(instance.assignments.values_list('user', flat=True))
+            new_assignees_set = set(assignee.id for assignee in assignees)
 
-            # Convert assignees to a set for easy comparison
-            assignees_set = set(assignees)
 
-            # Find assignees to be added and removed
-            assignees_to_add = assignees_set - current_assignees
-            assignees_to_remove = current_assignees - assignees_set
-
-            # Begin a transaction block
-            with transaction.atomic():
-                # Add new assignees (avoid duplicates)
-                add_assignments = [
-                    TaskAssignment(task=instance, user=assignee)
-                    for assignee in assignees_to_add
-                    if not TaskAssignment.objects.filter(task=instance, user=assignee).exists()
-                ]
-                if add_assignments:
-                    TaskAssignment.objects.bulk_create(add_assignments)
-
+            to_remove = current_assignees - new_assignees_set
+            to_add = new_assignees_set - current_assignees
+            
+            if to_remove:
                 # Remove assignees
-                if assignees_to_remove:
-                    TaskAssignment.objects.filter(
-                        task=instance, user__in=assignees_to_remove
-                    ).delete()
+                TaskAssignment.objects.filter(task=instance, user__in=to_remove).delete()
+                to_remove = list(to_remove)
+                
+            if to_add:
+                for user_id in to_add:
+                    TaskAssignment.objects.create(task=instance, user_id=user_id)
+                to_add = list(to_add)
+            
 
-                # Update total_assignees count
-                instance.total_assignees = len(assignees)
+            # Update total_assignees count
+            instance.total_assignees = len(assignees)
 
-                # Save the task instance
-                instance.save()
+            # Save the task instance
+            instance.save()
 
+            self.context['new_assignees'] = User.objects.filter(id__in=to_add)
+            self.context['removed_assignees'] = User.objects.filter(id__in=to_remove)
+            
         return instance
 
     def destroy(self, instance):
@@ -212,6 +225,9 @@ class TaskUpdateSerializer(serializers.ModelSerializer):
         instance.delete()
 
         return instance
+    
+    def to_representation(self, instance):
+        return TaskDetailSerializer(instance, context=self.context).data
     
 # Task status change by assignee
 class TaskStatusChangeSerializer(serializers.ModelSerializer):
@@ -335,3 +351,6 @@ class StatusChangeRequestSerializer(serializers.ModelSerializer):
         if status != 'pending':
             raise serializers.ValidationError("Only pending status change requests can be updated.")
         return super().update(instance, validated_data)
+
+class StatusChangeActionSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(choices=["accept", "reject"])
