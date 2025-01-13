@@ -3,18 +3,24 @@ from typing import Any
 # Local imports
 from apps.projects.models import Project, ProjectMembership
 from apps.tasks.models import Task, TaskAssignment, Comment, StatusChangeRequest
+from apps.tasks.filters import PermissionBasedFilterBackend
 from apps.tasks.serializers import (
     TaskCreateSerializer, TaskListSerializer, TaskDetailSerializer,
     TaskUpdateSerializer, StatusChangeRequestSerializer,CommentCreateSerializer,
     CommentListSerializer, CommentDetailSerializer, TaskStatusChangeSerializer,
     StatusChangeActionSerializer
 )
-from apps.tasks.permissions import IsTaskAssigneeOrProjectMember, IsProjectOwnerOrReadOnly
+from core.permissions import (
+    IsProjectOwner,
+    IsProjectMember,
+    IsTaskAssignee,
+    CanManageTask,
+    ReadOnly
+)
 from apps.notifications.utils import send_real_time_notification
 # Django imports
 from django.contrib.contenttypes.models import ContentType
 from django.db.models import Q
-from django.shortcuts import get_object_or_404
 from django.urls import reverse
 # Third-party imports
 from django_filters.rest_framework import DjangoFilterBackend
@@ -24,12 +30,11 @@ from drf_spectacular.utils import (
 from rest_framework import status, filters, permissions
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
+from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView, ListAPIView
 from rest_framework.response import Response
-from rest_framework.exceptions import PermissionDenied, NotFound, ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.throttling import UserRateThrottle
-from rest_framework.serializers import Serializer
 # Utility for standardized responses
 def standardized_response(
     status_code: int,status_message: str,
@@ -55,7 +60,7 @@ class TaskListCreateView(ListCreateAPIView):
     """
     View to list all tasks or create a new task with assignees.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsProjectMember | CanManageTask]
     throttle_classes = [UserRateThrottle]
     serializer_class = TaskCreateSerializer
 
@@ -106,6 +111,11 @@ class TaskListCreateView(ListCreateAPIView):
 
         return queryset
     
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [permissions.IsAuthenticated(), CanManageTask()]
+        return super().get_permissions()
+    
     def get_serializer_class(self):
         """
         Override to return the appropriate serializer class based on the request method.
@@ -120,13 +130,15 @@ class TaskListCreateView(ListCreateAPIView):
         if not ProjectMembership.objects.filter(project=project, user=self.request.user).exists():
             return standardized_response(
                 status_code=403,
-                status_message="failure",
+                status_message="forbidden",
                 message="You do not have permission to create tasks for this project."
             )
+        if not project.can_create_tasks():
+            raise ValidationError(f"Cannot create tasks when project is {project.status}")
         task = serializer.save(assigned_by=self.request.user)
         assignees = serializer.validated_data.get('assignees', [])
         task_content_type = ContentType.objects.get_for_model(Task)
-
+        request = self.request
 
         # Send notifications to assignees
         for assignee in assignees:
@@ -135,7 +147,7 @@ class TaskListCreateView(ListCreateAPIView):
                 message={
                     "title": "New Task Assigned",
                     "body": f"You have been assigned to the task '{task.name}'.",
-                    "url": f"/tasks/{task.id}/"
+                    "url": request.build_absolute_uri(reverse('task-retrieve-update-destroy', kwargs={'pk': task.id})),
                 },
                 notification_type="task",
                 content_type=task_content_type.id,
@@ -227,7 +239,7 @@ class TaskRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView):
     API view to retrieve, update, or delete a specific task.
     """
     queryset = Task.objects.all()
-    permission_classes = [IsAuthenticated, IsProjectOwnerOrReadOnly]
+    permission_classes = [IsAuthenticated, IsTaskAssignee | CanManageTask]
     throttle_classes = [UserRateThrottle]
     serializer_class = TaskUpdateSerializer
 
@@ -268,6 +280,11 @@ class TaskRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView):
             queryset = queryset.filter(status=status_filter)
 
         return queryset
+
+    def get_permissions(self):
+        if self.request.method in ['PUT', 'PATCH', 'DELETE']:
+            return [permissions.IsAuthenticated(), CanManageTask()]
+        return super().get_permissions()
 
     @extend_schema(
         summary="Retrieve Task Details",
@@ -371,28 +388,33 @@ class TaskRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView):
     )
     def patch(self, request, *args, **kwargs):
         try:
-            task = Task.objects.get(id=pk)
+            response = super().patch(request, *args, **kwargs)
             
-            if task.need_approval:
-                raise PermissionDenied("Task requires approval to change status.")
-            
-            if not TaskAssignment.objects.filter(task=task, user=request.user).exists():
-                raise PermissionDenied("You must be assigned to the task to change its status.")
+            return standardized_response(
+                status_code=response.status_code,
+                status_message="success" if response.status_code == status.HTTP_200_OK else "error",
+                message="Task updated successfully." if response.status_code == status.HTTP_200_OK else "Failed to update task.",
+                data=response.data
+            )
+        except ValidationError as e:
+            error_messages = {}
+            if hasattr(e.detail, 'items'):
+                for field, errors in e.detail.items():
+                    error_messages[field] = errors[0] if isinstance(errors, list) else str(errors)
+            else:
+                error_messages['detail'] = e.detail[0] if isinstance(e.detail, list) else str(e.detail)
 
-            serializer = TaskStatusChangeSerializer(task, data=request.data, partial=True)
-            if serializer.is_valid():
-                serializer.save()
-                return standardized_response(
-                    status_code=200,
-                    status_message="success",
-                    message="Task status updated successfully.",
-                    data=serializer.data
-                )
             return standardized_response(
                 status_code=400,
                 status_message="validation_error",
-                message="Invalid status value.",
-                data={"errors": serializer.errors}
+                message="Validation failed",
+                data={"errors": error_messages}
+            )
+        except PermissionDenied as e:
+            return standardized_response(
+                status_code=403,
+                status_message="permission_denied", 
+                message="You don't have permission to update this task."
             )
         except Task.DoesNotExist:
             return standardized_response(
@@ -400,17 +422,11 @@ class TaskRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView):
                 status_message="not_found",
                 message="Task not found."
             )
-        except PermissionDenied as e:
-            return standardized_response(
-                status_code=403,
-                status_message="permission_denied",
-                message=str(e)
-            )
         except Exception as e:
             return standardized_response(
                 status_code=500,
                 status_message="server_error",
-                message="Failed to update task status."
+                message="Failed to process task update. Please try again."
             )
 
     @extend_schema(
@@ -452,7 +468,8 @@ class TaskRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView):
         request = self.request
         if request.user != task.project.owner:
             raise PermissionDenied("Only the project owner can update this task.")
-        
+        if not task.project.can_perform_activity:
+            raise ValidationError(f"Can't update task of {task.project.status} project.")
         updated_task = serializer.save()
         add_assignees = serializer.context.get('new_assignees', [])
         remove_assignees = serializer.context.get('removed_assignees', [])
@@ -492,13 +509,14 @@ class TaskRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView):
         Delete the task and its associated task assignments.
         """
         task_content_type = ContentType.objects.get_for_model(Task)
+        request = self.request
         for assignee in instance.assignments.all():
             send_real_time_notification.delay(
-                user_id=assignee.id,
+                user=assignee,
                 message={
                     "title": "Task Deleted",
                     "body": f"The task '{instance.name}' has been deleted.",
-                    "url": "/tasks/"
+                    "url": request.build_absolute_uri(reverse('task-list-create')),
                 },
                 notification_type="task",
                 content_type=task_content_type.id,
@@ -513,7 +531,7 @@ class TaskStatusChangeView(APIView):
     This view allows users to directly update the task status if the task 
     does not require approval and if the user is part of the task.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsTaskAssignee | CanManageTask]
 
     @extend_schema(
         summary="Update Task Status",
@@ -556,7 +574,8 @@ class TaskStatusChangeView(APIView):
             task = Task.objects.get(id=pk)
         except Task.DoesNotExist:
             return Response({"detail": "Task not found."}, status=status.HTTP_404_NOT_FOUND)
-
+        if not task.can_perform_activity:
+            raise ValidationError(f"Can't update task of {task.project.status} project.")
         if task.need_approval:
             raise PermissionDenied("Task requires approval to change status.")
         
@@ -566,14 +585,15 @@ class TaskStatusChangeView(APIView):
         serializer = TaskStatusChangeSerializer(task, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
+            request = self.request
             # Send notification to all assignees about the status change
             for assignee in task.assignees.all():
                 send_real_time_notification.delay(
-                    user_id=assignee.id,
+                    user=assignee,
                     message={
                         "title": "Task Status Updated",
-                        "body": f"The status of the task '{task.title}' has been updated to '{serializer.validated_data['status']}'.",
-                        "url": f"/tasks/{task.id}/"
+                        "body": f"The status of the task '{task.name}' has been updated to '{serializer.validated_data['status']}'.",
+                        "url": request.build_absolute_uri(reverse('task-retrieve-update-destroy', kwargs={'pk': task.id})),
                     },
                     notification_type="task",
                     content_type=ContentType.objects.get_for_model(Task).id,
@@ -584,40 +604,23 @@ class TaskStatusChangeView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class CommentListCreateView(ListCreateAPIView):
-    """
-    View to list and create comments for tasks.
-    """
-    permission_classes = [IsAuthenticated, IsTaskAssigneeOrProjectMember]
-    
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['task', 'author']
+    permission_classes = [permissions.IsAuthenticated, IsTaskAssignee | CanManageTask]
+    filter_backends = [PermissionBasedFilterBackend, DjangoFilterBackend, filters.OrderingFilter, filters.SearchFilter]
+    filterset_fields = ['task']
     ordering_fields = ['created_at', 'updated_at']
+    ordering = ['-created_at']
+    search_fields = ['content', 'author__username']
     throttle_classes = [UserRateThrottle]
 
     def get_queryset(self):
-        """
-        Retrieve comments with filters and optimized queries.
-        """
-        queryset = Comment.objects.select_related('author', 'task', 'task__project')
-
-        task_id = self.request.query_params.get('task_id')
-        project_id = self.request.query_params.get('project_id')
-        user_id = self.request.query_params.get('user_id')
+        queryset = Comment.objects.select_related('author', 'task', 'task__project').prefetch_related('mentioned_users')
+        
+        # Handle parent_id filter
         parent_id = self.request.query_params.get('parent_id')
-
-        if task_id:
-            queryset = queryset.filter(task_id=task_id)
-        elif project_id:
-            queryset = queryset.filter(task__project_id=project_id)
-        elif user_id:
-            queryset = queryset.filter(author_id=user_id)
-        else:
-            queryset = queryset.filter(author=self.request.user)
-
         if parent_id:
             queryset = queryset.filter(parent_id=parent_id)
         else:
-            queryset = queryset.filter(parent=None)  # Only top-level comments
+            queryset = queryset.filter(parent=None)
 
         return queryset
 
@@ -632,61 +635,96 @@ class CommentListCreateView(ListCreateAPIView):
         parameters=[
             OpenApiParameter(name='task_id', description='ID of the task', required=False, type=int),
             OpenApiParameter(name='project_id', description='ID of the project', required=False, type=int),
-            OpenApiParameter(name='user_id', description='ID of the user', required=False, type=int),
             OpenApiParameter(name='parent_id', description='ID of the parent comment for replies', required=False, type=int),
+            OpenApiParameter(name='search', description='Search comments by content or author username', required=False, type=str),
             OpenApiParameter(name='page', description='Page number for pagination', required=False, type=int),
             OpenApiParameter(name='page_size', description='Number of items per page', required=False, type=int),
         ],
         responses={
             200: CommentListSerializer(many=True),
             201: CommentListSerializer,
-            403: OpenApiExample(
-                'Forbidden',
-                value={'detail': 'You do not have permission to perform this action.'},
-                response_only=True,
-            ),
+            403: {"description": "Forbidden"},
         }
     )
     def post(self, request, *args, **kwargs):
         """
-        Handle POST requests to create a new comment and send notifications for mentions or replies.
+        Create a new comment after checking project status.
         """
+        task_id = request.data.get('task')
+        task = Task.objects.select_related('project').get(id=task_id)
+        
+        # Check project status
+        if task.project.status == 'completed':
+            return Response(
+                {"error": "Cannot add comments to a completed project"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+            
+        if task.project.status in ['not_started', 'on_hold']:
+            return Response(
+                {"error": f"Cannot add comments when project is {task.project.status}"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         response = super().post(request, *args, **kwargs)
-        if response.status_code == 201:
-            comment = Comment.objects.get(id=response.data['id'])
-
-            # Send notifications to mentioned users
-            mentioned_users = comment.mentioned_users.all()
-            for user in mentioned_users:
-                send_real_time_notification(
-                    user=user,
-                    message={
-                        "title": "You were mentioned in a comment",
-                        "body": f"{request.user.username} mentioned you in a comment: '{comment.content}'",
-                        "url": f"/tasks/comments/{comment.id}/"
-                    },
-                    notification_type="task",
-                    content_type=ContentType.objects.get_for_model(Comment).id,
-                    object_id=comment.id
-                )
-
-            # Send notification to the parent comment author (if it's a reply)
-            if comment.parent:
-                parent_author = comment.parent.author
-                if parent_author != request.user:  # Avoid self-notification
-                    send_real_time_notification.delay(
-                        user=parent_author,
-                        message={
-                            "title": "New Reply to Your Comment",
-                            "body": f"{request.user.username} replied to your comment: '{comment.content}'",
-                            "url": f"/tasks/comments/{comment.parent.id}/"
-                        },
-                        notification_type="task",
-                        content_type=ContentType.objects.get_for_model(Comment).id,
-                        object_id=comment.parent.id
-                    )
-
+        if response.status_code == status.HTTP_201_CREATED:
+            self.send_notifications(response.data['id'])
         return response
+
+    def send_notifications(self, comment_id):
+        comment = Comment.objects.select_related('parent', 'parent__author', 'task').get(id=comment_id)
+        request = self.request
+        content_type = ContentType.objects.get_for_model(Comment)
+
+        for user in comment.mentioned_users.all():
+            self.send_mention_notification(user, comment, request, content_type)
+
+        if comment.parent and comment.parent.author != request.user:
+            self.send_reply_notification(comment, request, content_type)
+
+        # Notify task assignees about the new comment
+        task_assignees = comment.task.assignments.exclude(user=request.user).select_related('user')
+        for assignment in task_assignees:
+            self.send_task_comment_notification(assignment.user, comment, request, content_type)
+
+    def send_mention_notification(self, user, comment, request, content_type):
+        send_real_time_notification(
+            user=user,
+            message={
+                "title": "You were mentioned in a comment",
+                "body": f"{request.user.username} mentioned you in a comment: '{comment.content[:50]}...'",
+                "url": request.build_absolute_uri(reverse('comment-detail', kwargs={'pk': comment.id})),
+            },
+            notification_type="comment_mention",
+            content_type=content_type.id,
+            object_id=comment.id
+        )
+
+    def send_reply_notification(self, comment, request, content_type):
+        send_real_time_notification(
+            user=comment.parent.author,
+            message={
+                "title": "New Reply to Your Comment",
+                "body": f"{request.user.username} replied to your comment: '{comment.content[:50]}...'",
+                "url": request.build_absolute_uri(reverse('comment-detail', kwargs={'pk': comment.id})),
+            },
+            notification_type="comment_reply",
+            content_type=content_type.id,
+            object_id=comment.parent.id
+        )
+
+    def send_task_comment_notification(self, user, comment, request, content_type):
+        send_real_time_notification(
+            user=user,
+            message={
+                "title": "New Comment on Task",
+                "body": f"{request.user.username} commented on task '{comment.task.name}': '{comment.content[:50]}...'",
+                "url": request.build_absolute_uri(reverse('task-detail', kwargs={'pk': comment.task.id})),
+            },
+            notification_type="task_comment",
+            content_type=content_type.id,
+            object_id=comment.id
+        )
 
 class CommentDetailView(RetrieveUpdateDestroyAPIView):
     """
@@ -694,7 +732,7 @@ class CommentDetailView(RetrieveUpdateDestroyAPIView):
     """
     queryset = Comment.objects.select_related('author', 'task', 'task__project').prefetch_related('mentioned_users')
     serializer_class = CommentDetailSerializer
-    permission_classes = [IsAuthenticated, IsTaskAssigneeOrProjectMember]
+    permission_classes = [IsAuthenticated, IsTaskAssignee | CanManageTask]
     throttle_classes = [UserRateThrottle]
 
     @extend_schema(
@@ -733,23 +771,36 @@ class CommentDetailView(RetrieveUpdateDestroyAPIView):
         Handle PUT request to update the comment and send notifications for new mentions.
         """
         comment = self.get_object()
-        original_mentioned_users = set(comment.mentioned_users.all())
         
+        # Check project status
+        if comment.task.project.status == 'completed':
+            return Response(
+                {"error": "Cannot update comments in a completed project"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+            
+        if comment.task.project.status in ['not_started', 'on_hold']:
+            return Response(
+                {"error": f"Cannot update comments when project is {comment.task.project.status}"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        original_mentioned_users = set(comment.mentioned_users.all())
         response = super().put(request, *args, **kwargs)
 
         if response.status_code == 200:
             updated_comment = self.get_object()
             updated_mentioned_users = set(updated_comment.mentioned_users.all())
-
-            # Determine newly mentioned users
+            request = self.request
             new_mentions = updated_mentioned_users - original_mentioned_users
+            
             for user in new_mentions:
                 send_real_time_notification(
                     user=user,
                     message={
                         "title": "You were mentioned in a comment",
                         "body": f"{request.user.username} mentioned you in an updated comment: '{updated_comment.content}'",
-                        "url": f"/tasks/comments/{updated_comment.id}/"
+                        "url": request.build_absolute_uri(reverse('comment-detail', kwargs={'pk': updated_comment.id})),
                     },
                     notification_type="task",
                     content_type=ContentType.objects.get_for_model(Comment).id,
@@ -774,15 +825,27 @@ class CommentDetailView(RetrieveUpdateDestroyAPIView):
         """
         Handle DELETE request to delete the comment.
         """
+        comment = self.get_object()
+        if comment.author != request.user:
+            return Response({"detail": "You do not have permission to delete this comment."}, status=status.HTTP_403_FORBIDDEN)
         return super().delete(request, *args, **kwargs)
-
+class CommentRepliesView(ListAPIView):
+    """
+    Handles listing replies for a specific comment with pagination.
+    """
+    serializer_class = CommentListSerializer
+    pagination_class = PageNumberPagination
+    permission_classes = [IsAuthenticated, IsTaskAssignee | CanManageTask]
+    def get_queryset(self):
+        comment_id = self.kwargs['pk']
+        return Comment.objects.filter(parent_id=comment_id).select_related('author')
 class StatusChangeRequestListCreateView(ListCreateAPIView):
     """
     API view for listing and creating status change requests.
     """
     queryset = StatusChangeRequest.objects.all()
     serializer_class = StatusChangeRequestSerializer
-    permission_classes = [IsAuthenticated, IsProjectOwnerOrReadOnly]
+    permission_classes = [IsAuthenticated, IsTaskAssignee | CanManageTask]
     
     throttle_classes = [UserRateThrottle]
 
@@ -847,13 +910,19 @@ class StatusChangeRequestListCreateView(ListCreateAPIView):
         """
         Automatically set the user making the request as the creator.
         """
+        project = serializer.validated_data['task'].project
+        if project.status == 'completed':
+            raise ValidationError("Cannot create status change requests for completed projects.")
+        if project.status == 'on_hold':
+            raise ValidationError("Cannot create status change requests for on hold projects.")
         status_request = serializer.save(user=self.request.user)
-        send_real_time_notification.delay(
-            user=status_request.assigned_by,
+        request = self.request
+        send_real_time_notification(
+            user=status_request.task.assigned_by,
             message={
                 "title": "Status Change Request",
-                "body": f"'{self.request.user}' created a status change request for task: '{status_request.task.title}'.",
-                "url": f"/tasks/status/change/requests/{status_request.id}/"
+                "body": f"'{self.request.user}' created a status change request for task: '{status_request.task.name}'.",
+                "url": request.build_absolute_uri(reverse('status-change-request-retrieve-update-destroy', kwargs={'pk': status_request.task.id}))
             },
             notification_type="task",
             content_type=ContentType.objects.get_for_model(StatusChangeRequest).id,
@@ -866,7 +935,7 @@ class StatusChangeRequestRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView)
     """
     queryset = StatusChangeRequest.objects.all()
     serializer_class = StatusChangeRequestSerializer
-    permission_classes = [IsAuthenticated, IsProjectOwnerOrReadOnly]
+    permission_classes = [IsAuthenticated, IsTaskAssignee | CanManageTask]
 
     @extend_schema(
         summary="Retrieve Status Change Request",
@@ -897,6 +966,11 @@ class StatusChangeRequestRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView)
         }
     )
     def perform_update(self, serializer):
+        project = serializer.instance.task.project
+        if project.status == 'completed':
+            raise ValidationError("Cannot update status change requests for completed projects.")
+        if project.status == 'on_hold':
+            raise ValidationError("Cannot update status change requests for on hold projects.")
         super().perform_update(serializer)
 
     @extend_schema(
@@ -919,7 +993,7 @@ class StatusChangeRequestAcceptRejectView(APIView):
     """
     API view for accepting or rejecting a status change request.
     """
-    permission_classes = [IsAuthenticated, IsProjectOwnerOrReadOnly]
+    permission_classes = [IsAuthenticated, CanManageTask]
     serializer_class = StatusChangeActionSerializer
     @extend_schema(
         summary="Accept/Reject Status Change Request",

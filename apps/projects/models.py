@@ -27,7 +27,7 @@ class Project(models.Model):
         related_name='owned_projects'
     )  # Owner of the project
     created_at = models.DateTimeField(auto_now_add=True)  # Project creation timestamp
-
+    updated_at = models.DateTimeField(auto_now=True)  # Last update timestamp
     # Tracking fields
     total_tasks = models.PositiveIntegerField(default=0)  # Total tasks associated with the project
     status = models.CharField(
@@ -37,7 +37,7 @@ class Project(models.Model):
     )  # Current status of the project
     due_date = models.DateTimeField(null=True, blank=True)  # Optional due date for the project
     total_member_count = models.PositiveIntegerField(default=1)  # Total members in the project (including the owner)
-
+    admin_override = models.BooleanField(default=False)  # Flag to check admin override of project details (e.g., increase member count)
     def __str__(self):
         return self.name
 
@@ -56,7 +56,21 @@ class Project(models.Model):
         """
         self.total_member_count = self.memberships.count()
         self.save()
+    def can_create_task(self):
+        """Check if tasks can be created based on project status"""
+        return self.status in ['in_progress', 'overdue']
 
+    def can_update_project(self):
+        """Check if project can be updated based on status"""
+        return self.status != 'completed'
+
+    def is_read_only(self):
+        """Check if project is in read-only state"""
+        return self.status == 'completed'
+
+    def can_perform_activity(self):
+        """Check if project activities are allowed based on status"""
+        return self.status not in ['not_started', 'on_hold', 'completed']
 
 class ProjectMembershipQuerySet(models.QuerySet):
     """

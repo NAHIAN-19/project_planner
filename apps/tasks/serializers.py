@@ -1,4 +1,5 @@
 # local imports
+from os import read
 from apps.projects.models import Project, ProjectMembership
 from apps.projects.serializers import ProjectMembershipSerializer
 from apps.tasks.models import Task, TaskAssignment, Comment, StatusChangeRequest
@@ -18,7 +19,7 @@ class TaskAssignmentSerializer(serializers.ModelSerializer):
     """
     Optimized serializer for task assignment details.
     """
-    user = serializers.CharField(source='user.username')
+    user = serializers.PrimaryKeyRelatedField(read_only=True)
     membership_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -64,9 +65,9 @@ class TaskDetailSerializer(serializers.ModelSerializer):
     Serializer for showing detailed information about a task.
     """
     assignments_ = TaskAssignmentSerializer(source='assignments', many=True, read_only=True)
-    project = serializers.StringRelatedField()  # Show project name or use ProjectSerializer if details are needed
-    assigned_by = serializers.StringRelatedField()  # Display the username of the assigned_by user
-    approved_by = serializers.StringRelatedField()  # Display the username of the approved_by user
+    project = serializers.PrimaryKeyRelatedField(read_only=True)
+    assigned_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    approved_by = serializers.PrimaryKeyRelatedField(read_only=True)
 
     class Meta:
         model = Task
@@ -76,7 +77,6 @@ class TaskDetailSerializer(serializers.ModelSerializer):
             'assigned_by', 'approved_by', 'assignments_'
         ]
         read_only_fields = ['id', 'approved_by', 'assigned_by']
-
 
 class TaskCreateSerializer(serializers.ModelSerializer):
     """
@@ -117,7 +117,6 @@ class TaskCreateSerializer(serializers.ModelSerializer):
         return value
 
 
-
     def create(self, validated_data):
         """
         Create a new task, assign members (including project owner if not already in assignees), and update total_assignees.
@@ -125,13 +124,15 @@ class TaskCreateSerializer(serializers.ModelSerializer):
         assignees = validated_data.pop('assignees', [])
         task = Task.objects.create(**validated_data)
 
-        # Handle task assignments
-        for user in assignees:
-            TaskAssignment.objects.create(task=task, user=user)
+        # Bulk create assignments
+        TaskAssignment.objects.bulk_create([
+            TaskAssignment(task=task, user=user)
+            for user in assignees
+        ])
 
         # Update total_assignees count
         task.total_assignees = len(assignees)
-        task.save()
+        task.save(update_fields=['total_assignees'])
         return task
 
     def to_representation(self, instance):
@@ -144,7 +145,7 @@ class TaskCreateSerializer(serializers.ModelSerializer):
             'description': instance.description,
             'status': instance.status,
             'due_date': instance.due_date,
-            'project': instance.project.name,  # Assuming you have a 'name' field in the Project model
+            'project': instance.project.id,
             'total_assignees': instance.total_assignees,
             'assigned_by': instance.assigned_by.username,
             'assignees': TaskAssignmentSerializer(
@@ -183,8 +184,7 @@ class TaskUpdateSerializer(serializers.ModelSerializer):
         # Update task fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
-
-        # If assignees are provided, handle member management
+        print(instance.status)
         if assignees is not None:
             # Get the current assignees (users already assigned to the task)
             current_assignees = set(instance.assignments.values_list('user', flat=True))
@@ -213,7 +213,8 @@ class TaskUpdateSerializer(serializers.ModelSerializer):
 
             self.context['new_assignees'] = User.objects.filter(id__in=to_add)
             self.context['removed_assignees'] = User.objects.filter(id__in=to_remove)
-            
+        instance.save()
+        instance.refresh_from_db()
         return instance
 
     def destroy(self, instance):
@@ -252,28 +253,37 @@ class TaskStatusChangeSerializer(serializers.ModelSerializer):
 #==================#
 
 class CommentListSerializer(serializers.ModelSerializer):
-    author = CustomUserSerializer(read_only=True)
+    author = serializers.PrimaryKeyRelatedField(read_only=True)
     task = serializers.SerializerMethodField()
+    has_replies = serializers.SerializerMethodField()  # Flag for replies
 
     class Meta:
         model = Comment
-        fields = ['id', 'task', 'author', 'content', 'created_at', 'updated_at', 'parent', 'reply_count', 'mention_count']
-        read_only_fields = ['author', 'created_at', 'updated_at', 'reply_count', 'mention_count']
+        fields = ['id', 'task', 'author', 'content', 'created_at', 'reply_count', 'has_replies']
 
     def get_task(self, obj):
         return {'id': obj.task.id, 'name': obj.task.name}
 
+    def get_has_replies(self, obj):
+        return obj.reply_count > 0
+
+
 class CommentDetailSerializer(serializers.ModelSerializer):
-    author = CustomUserSerializer(read_only=True)
-    mentioned_users = CustomUserSerializer(many=True, read_only=True)
+    author = serializers.PrimaryKeyRelatedField(read_only=True)
+    mentioned_users = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     task = serializers.SerializerMethodField()
     project = serializers.SerializerMethodField()
-    replies = serializers.SerializerMethodField()
+    has_replies = serializers.SerializerMethodField()  # Flag for replies
 
     class Meta:
         model = Comment
-        fields = ['id', 'task', 'project', 'author', 'content', 'created_at', 'updated_at', 'mentioned_users', 'parent', 'reply_count', 'mention_count', 'replies']
-        read_only_fields = ['author', 'created_at', 'updated_at', 'mentioned_users', 'reply_count', 'mention_count', 'replies']
+        fields = [
+            'id', 'task', 'project', 'author', 'content', 'created_at', 'updated_at',
+            'mentioned_users', 'parent', 'reply_count', 'mention_count', 'has_replies'
+        ]
+        read_only_fields = [
+            'id', 'author', 'created_at', 'updated_at', 'reply_count', 'mention_count'
+        ]
 
     def get_task(self, obj):
         return {'id': obj.task.id, 'name': obj.task.name}
@@ -281,13 +291,12 @@ class CommentDetailSerializer(serializers.ModelSerializer):
     def get_project(self, obj):
         return {'id': obj.task.project.id, 'name': obj.task.project.name}
 
-    def get_replies(self, obj):
-        if obj.parent is None:  # Only get replies for top-level comments
-            replies = Comment.objects.filter(parent=obj).select_related('author').prefetch_related('mentioned_users')
-            return CommentListSerializer(replies, many=True, context=self.context).data
-        return []
+    def get_has_replies(self, obj):
+        return obj.reply_count > 0
 
 class CommentCreateSerializer(serializers.ModelSerializer):
+    MAX_DEPTH = 3  # Set the maximum allowed depth for nested comments
+
     class Meta:
         model = Comment
         fields = ['id', 'task', 'content', 'parent']
@@ -297,50 +306,91 @@ class CommentCreateSerializer(serializers.ModelSerializer):
         user = self.context['request'].user
         task = attrs.get('task')
 
+        # Check if task is provided and the user is assigned to it
         if not task:
-            raise serializers.ValidationError("Task is required.")
+            raise serializers.ValidationError({"task": "Task is required."})
 
         if not task.assignments.filter(user=user).exists():
-            raise serializers.ValidationError("You are not assigned to this task.")
-        
+            raise serializers.ValidationError({"task": "You are not assigned to this task."})
+
+        # Validate content length
         content = attrs.get('content')
-        if len(content) > 1000:
-            raise serializers.ValidationError("Content must not exceed 1000 characters.")
-        
+        if content and len(content) > 1000:
+            raise serializers.ValidationError({"content": "Content must not exceed 1000 characters."})
+
+        # Validate parent comment
         parent = attrs.get('parent')
         if parent:
             if parent.task != task:
-                raise serializers.ValidationError("Parent comment must belong to the same task.")
-            if parent.parent:
-                raise serializers.ValidationError("Cannot reply to a reply. Only top-level comments can have replies.")
-        
+                raise serializers.ValidationError(
+                    {"parent": "The parent comment must belong to the same task."}
+                )
+
+            # Check depth limit
+            current_depth = 1
+            while parent:
+                current_depth += 1
+                parent = parent.parent
+                if current_depth > self.MAX_DEPTH:
+                    raise serializers.ValidationError(
+                        {"parent": f"Cannot nest comments more than {self.MAX_DEPTH} levels deep."}
+                    )
+
         return attrs
 
     def create(self, validated_data):
+        # Set the author of the comment to the current user
         validated_data['author'] = self.context['request'].user
         return super().create(validated_data)
+    def to_representation(self, instance):
+        return CommentDetailSerializer(instance, context=self.context).data
     
 #=========================#
 # Status Changes Requests #
 #=========================#
 class StatusChangeRequestSerializer(serializers.ModelSerializer):
-    task_name = serializers.CharField(source='task.name', read_only=True)
-    username = serializers.CharField(source='user.username', read_only=True)
+    task = serializers.SerializerMethodField()
+    user = serializers.PrimaryKeyRelatedField(read_only=True)
+    approved_by = serializers.PrimaryKeyRelatedField(read_only=True)
 
     class Meta:
         model = StatusChangeRequest
-        fields = ['id', 'task', 'task_name', 'user', 'username', 'request_time', 'reason', 'status', 'approved_by']
-        read_only_fields = ['status', 'approved_by', 'user']
+        fields = [
+            'id', 'task','user', 'request_time', 'reason', 'status', 'approved_by'
+        ]
+        read_only_fields = [
+            'id', 'user', 'request_time', 'status', 'approved_by'
+        ]
+
+    def get_task(self, obj):
+        return {
+            'id': obj.task.id,
+            'name': obj.task.name,
+        }
 
     def validate(self, data):
-        task = data.get('task')
-        if task.status not in ['in_progress', 'overdue', 'not_started']:
-            raise serializers.ValidationError("Only tasks that are 'in_progress' or 'overdue' can be marked as completed.")
+        if self.instance:
+            task = self.instance.task
+        else:
+            task = data.get('task')
+        user = self.context['request'].user
+
+        if not task.assignments.filter(user=user).exists():
+            raise serializers.ValidationError("You must be assigned to the task to request status change")
+        if self.instance:
+            if self.instance.status != 'pending':
+                raise serializers.ValidationError("Only pending status change requests can be updated.")
+        if task.status not in ['in_progress', 'overdue']:
+            raise serializers.ValidationError("Only tasks that are 'in_progress' or 'overdue' can be marked as completed")
         
         if not task.need_approval:
-            raise serializers.ValidationError("Task doesn't require approval to be completed.")
-        
+            raise serializers.ValidationError("Task doesn't require approval to be completed")
+
         return data
+
+    def create(self, validated_data):
+        validated_data['user'] = self.context['request'].user
+        return super().create(validated_data)
 
     def update(self, instance, validated_data):
         """

@@ -16,11 +16,12 @@ urlpatterns = [
     path('api/v1/projects/', include('apps.projects.urls')),
     path('api/v1/tasks/', include('apps.tasks.urls')),
     path('api/v1/notifications/', include('apps.notifications.urls')),
-
+    path('api/v1/admins/', include('apps.admins.urls')),
+    
     # DRF Spectacular Schema URLs
-    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),  # OpenAPI Schema
-    path('api/schema/swagger-ui/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),  # Swagger UI
-    path('api/schema/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),  # ReDoc UI
+    path('api/v1/schema/', SpectacularAPIView.as_view(), name='schema'),  # OpenAPI Schema
+    path('api/v1/schema/swagger-ui/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),  # Swagger UI
+    path('api/v1/schema/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),  # ReDoc UI
 ]
 if settings.DEBUG:
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

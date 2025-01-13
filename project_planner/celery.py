@@ -21,6 +21,14 @@ app.conf.beat_schedule = {
         'task': 'core.tasks.check_overdue_items',
         'schedule': crontab(minute=0, hour='*'),
     },
+    'prune-notifications-every-7-days': {
+        'task': 'core.tasks.prune_notifications',
+        'schedule': crontab(minute=0, hour=0, day_of_week=0),  # This will run every Sunday at midnight
+    },
+    'update-last-seen': {
+        'task': 'core.tasks.update_last_seen',
+        'schedule': crontab(minute='*/15'),  # Run every 15 minutes
+    },
 }
 @app.task(bind=True)
 def debug_task(self):

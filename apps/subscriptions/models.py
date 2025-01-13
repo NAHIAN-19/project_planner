@@ -3,6 +3,8 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.core.validators import MinValueValidator
 
+from apps.notifications.models import STATUS_CHOICES
+
 User = get_user_model()
 
 class SubscriptionPlan(models.Model):
@@ -70,7 +72,15 @@ class Subscription(models.Model):
             bool: True if the subscription is active and the end date is in the future.
         """
         return self.is_active and self.end_date > timezone.now()
-
+    
+    def revert_to_basic(self):
+        """
+        Reverts the subscription to the basic plan.
+        """
+        self.plan = SubscriptionPlan.objects.get(name='basic')
+        self.start_date = timezone.now()
+        self.end_date = timezone.now() + timezone.timedelta(days=self.plan.duration_days)
+        self.save()
 class Payment(models.Model):
     """
     Represents a payment made by a user for their subscription.
@@ -81,11 +91,17 @@ class Payment(models.Model):
         - date: The timestamp of when the payment was made.
         - stripe_payment_intent_id: The unique identifier for the Stripe payment intent.
     """
+    STATUS_CHOICES = (
+        ('succeeded', 'Succeeded'),
+        ('failed', 'Failed'),
+        ('pending', 'Pending'),
+    )
     subscription = models.ForeignKey(Subscription, on_delete=models.CASCADE, related_name='payments')
     amount = models.DecimalField(max_digits=6, decimal_places=2)
     date = models.DateTimeField(default=timezone.now)
     stripe_payment_intent_id = models.CharField(max_length=100)
-
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    payment_method = models.CharField(max_length=50, default='card')
     def __str__(self):
         """
         Returns a user-friendly string representation of the payment.

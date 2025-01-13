@@ -4,6 +4,7 @@ attrs==24.3.0
 autobahn==24.4.2
 Automat==24.8.1
 billiard==4.2.1
+bleach==6.2.0
 celery==5.4.0
 certifi==2024.12.14
 cffi==1.17.1
@@ -21,7 +22,6 @@ daphne==4.1.2
 Django==5.1.4
 django-celery-beat==2.7.0
 django-celery-results==2.5.1
-django-channels==0.7.0
 django-cors-headers==4.6.0
 django-filter==24.3
 django-otp==1.5.4
@@ -35,13 +35,15 @@ hyperlink==21.0.0
 idna==3.10
 incremental==24.7.2
 inflection==0.5.1
+isort==5.13.2
 jsonschema==4.23.0
 jsonschema-specifications==2024.10.1
 kombu==5.4.2
+Markdown==3.7
 msgpack==1.1.0
-oauthlib==3.2.2
 pillow==11.0.0
 prompt_toolkit==3.0.48
+psutil==6.1.1
 pyasn1==0.6.1
 pyasn1_modules==0.4.1
 pycparser==2.22
@@ -55,7 +57,6 @@ PyYAML==6.0.2
 redis==5.2.1
 referencing==0.35.1
 requests==2.32.3
-requests-oauthlib==2.0.0
 rpds-py==0.22.3
 service-identity==24.2.0
 setuptools==75.6.0
@@ -70,4 +71,5 @@ uritemplate==4.1.1
 urllib3==2.3.0
 vine==5.1.0
 wcwidth==0.2.13
+webencodings==0.5.1
 zope.interface==7.2

@@ -19,6 +19,7 @@ class User(AbstractUser):
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     
+    last_seen = models.DateTimeField(null=True, blank=True)  # Last seen timestamp
     date_joined = models.DateTimeField(auto_now_add=True)  # Date when user joined
     last_login = models.DateTimeField(null=True, blank=True)  # Date of the last login
     email_verified = models.BooleanField(default=False)  # Whether the user's email is verified

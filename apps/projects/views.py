@@ -11,6 +11,10 @@ from django.contrib.contenttypes.models import ContentType
 from django.db.models import Q
 from django.urls import reverse
 # third party imports
+from core.permissions import (
+    IsProjectMember,
+    IsProjectOwner
+)
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiExample
 from rest_framework import generics, permissions, status
@@ -248,7 +252,7 @@ class ProjectListCreateView(generics.ListCreateAPIView):
 )
 class ProjectRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     # Permission is restricted to authenticated users only.
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsProjectOwner]
     
     # Base queryset for retrieving projects.
     queryset = Project.objects.all()
@@ -306,7 +310,8 @@ class ProjectRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
         # Ensure that only the project owner can perform updates.
         if serializer.instance.owner != self.request.user:
             raise PermissionDenied("Only the project owner can update the project.")
-        
+        if serializer.instance.is_read_only:
+            raise PermissionDenied("This project is read-only and cannot be updated.")
         # Save the updated project instance.
         updated_project = serializer.save()
         
@@ -387,7 +392,7 @@ class ProjectRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
 )
 class ProjectMembershipView(generics.RetrieveAPIView):
     # Restrict access to authenticated users only.
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsProjectMember]
 
     # Base queryset for retrieving project memberships.
     queryset = ProjectMembership.objects.all()

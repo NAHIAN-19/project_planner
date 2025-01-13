@@ -3,6 +3,7 @@ from apps.projects.models import Project, ProjectMembership
 from apps.users.serializers import CustomUserSerializer, DetailedUserSerializer
 # django imports
 from django.contrib.auth import get_user_model
+from django.core.serializers.json import DjangoJSONEncoder
 from django.utils import timezone
 from django.urls import reverse
 # third-party imports
@@ -20,7 +21,7 @@ class ProjectMembershipSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ProjectMembership
-        fields = ['id', 'user', 'joined_at', 'membership_url']
+        fields = ['id', 'user', 'joined_at', 'membership_url', 'role']
 
     def get_membership_url(self, obj):
         """Build absolute URL for membership detail."""
@@ -68,6 +69,7 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
         fields = ['name', 'description', 'due_date', 'members', 'status']
+        json_encoder = DjangoJSONEncoder
 
     def validate_due_date(self, value):
         """Ensure due date is not in the past."""
@@ -146,6 +148,12 @@ class ProjectUpdateSerializer(serializers.ModelSerializer):
         user = self.context['request'].user
         subscription = user.subscription
         plan = subscription.plan if subscription else None
+        
+        # Check if the project has admin_override
+        instance = self.instance
+        if instance and instance.admin_override:
+            return value  # Skip the member limit check if admin_override is True
+
         if plan and plan.max_members_per_project > 1:
             if len(value) > plan.max_members_per_project:
                 raise serializers.ValidationError("You have exceeded the maximum number of members allowed by your plan.")
@@ -154,15 +162,8 @@ class ProjectUpdateSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         """Update project and manage membership changes."""
         members = validated_data.pop('members', None)
-        user = self.context['request'].user
-        subscription = user.subscription
-        plan = subscription.plan if subscription else None
-        members = list(set(members))  # Ensure unique member entries
-
-        # Validate membership count against plan limits
-        if plan and plan.max_members_per_project > 1:
-            if len(members) > plan.max_members_per_project:
-                raise serializers.ValidationError("You have exceeded the maximum number of members allowed by your plan.")
+        if members is not None:
+            members = list(set(members))  # Ensure unique member entries
 
         # Track membership changes
         new_members = []

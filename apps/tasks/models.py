@@ -1,7 +1,12 @@
+import re
+from django.utils import timezone
 from django.db import models
 from django.contrib.auth import get_user_model
 from apps.projects.models import Project
 from django.db.models import F
+from markdown import markdown
+from bleach import Cleaner
+from bleach.linkifier import LinkifyFilter
 User = get_user_model()
 
 class Task(models.Model):
@@ -80,6 +85,24 @@ class Comment(models.Model):
     reply_count = models.PositiveIntegerField(default=0)
     mention_count = models.PositiveIntegerField(default=0)
 
+    # Markdown and XSS protection settings
+    ALLOWED_TAGS = [
+        'p', 'div', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li',
+        'strong', 'em', 'a', 'code', 'pre', 'blockquote', 'hr', 'br', 'table',
+        'thead', 'tbody', 'tr', 'th', 'td'
+    ]
+    
+    ALLOWED_ATTRIBUTES = {
+        'a': ['href', 'title', 'target'],
+        'code': ['class'],
+        'pre': ['class'],
+        'span': ['class'],
+        'div': ['class'],
+        'p': ['class'],
+        'img': ['src', 'alt', 'title', 'width', 'height'],
+    }
+
+    ALLOWED_PROTOCOLS = ['http', 'https', 'mailto']
     class Meta:
         ordering = ['-created_at']
         indexes = [
@@ -93,6 +116,21 @@ class Comment(models.Model):
             return f"Reply by {self.author.username} to comment {self.parent.id} on Task {self.task.id}"
         return f"Comment by {self.author.username} on Task {self.task.id}"
 
+    def get_rendered_content(self):
+        """Render markdown content with XSS protection"""
+        # First pass: Convert markdown to HTML
+        html = markdown(self.content, extensions=['fenced_code', 'tables'])
+        
+        # Second pass: Clean and sanitize HTML
+        cleaner = Cleaner(
+            tags=self.ALLOWED_TAGS,
+            attributes=self.ALLOWED_ATTRIBUTES,
+            protocols=self.ALLOWED_PROTOCOLS,
+            filters=[LinkifyFilter]
+        )
+        
+        return cleaner.clean(html)
+    
     def save(self, *args, **kwargs):
         is_new = self.pk is None
         super().save(*args, **kwargs)
@@ -121,18 +159,21 @@ class Comment(models.Model):
 # Status Change Request #
 # ======================#
 class StatusChangeRequest(models.Model):
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("approved", "Approved"),
+        ("rejected", "Rejected")
+    ]
+
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="status_change_requests")
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="status_change_requests")
     request_time = models.DateTimeField(auto_now_add=True)
-    reason = models.TextField(blank=True, null=True)  # Optional reason for the status change request
-    status = models.CharField(
-        max_length=20,
-        choices=[("pending", "Pending"), ("approved", "Approved"), ("rejected", "Rejected")],
-        default="pending"
-    )
+    reason = models.TextField(blank=True, null=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     approved_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, related_name="status_change_approvals", null=True, blank=True
     )
+    resolution_time = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "status_change_requests"
@@ -140,7 +181,21 @@ class StatusChangeRequest(models.Model):
             models.Index(fields=["task"]),
             models.Index(fields=["status"]),
             models.Index(fields=["user"]),
+            models.Index(fields=["request_time"]),
         ]
+        ordering = ['-request_time']
 
     def __str__(self):
         return f"Request from {self.user.username} for task '{self.task.name}' status change"
+
+    def approve(self, approved_by):
+        self.status = "approved"
+        self.approved_by = approved_by
+        self.resolution_time = timezone.now()
+        self.save()
+
+    def reject(self, rejected_by):
+        self.status = "rejected"
+        self.approved_by = rejected_by
+        self.resolution_time = timezone.now()
+        self.save()

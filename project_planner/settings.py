@@ -10,6 +10,7 @@ load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
 # SECURITY SETTINGS
 # ================
 SECRET_KEY = os.getenv('SECRET_KEY')
@@ -46,6 +47,7 @@ LOCAL_APPS = [
     'apps.tasks',
     'apps.notifications',
     'apps.subscriptions',
+    'apps.admins',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -59,6 +61,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'apps.users.middleware.LastSeenMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -179,6 +182,7 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_FILTER_BACKENDS': [
@@ -212,6 +216,19 @@ SPECTACULAR_SETTINGS = {
     'DESCRIPTION': 'API documentation for Project Planner.',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
+    'DISABLE_WARNINGS': True,
+    'SWAGGER_UI_SETTINGS': {
+        'persistAuthorization': True,
+        'displayOperationId': True,
+    },
+    'TAGS': [
+        {'name': 'Users', 'description': 'User management endpoints'},
+        {'name': 'Admin', 'description': 'Administrative endpoints'},
+        {'name': 'Projects', 'description': 'Project management endpoints'},
+        {'name': 'Tasks', 'description': 'Task management endpoints'},
+        {'name': 'Subscriptions', 'description': 'Subscription management endpoints'},
+        {'name': 'Notifications', 'description': 'Notification management endpoints'},
+    ],
 }
 
 # Email Configuration
@@ -246,23 +263,15 @@ STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
 FRONTEND_URL = 'http://localhost:8000'
 
 
-# Logging Configuration
-# =====================
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-        },
-    },
-    'loggers': {
-        'apps.notifications.consumers': {
-            'handlers': ['console'],
-            'level': 'DEBUG',
-        },
-    },
-}
 # For development purposes, allow all origins
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+
+# System health check settings
+LOG_FILE_MAX_SIZE_MB = 50
+NETWORK_LATENCY_THRESHOLD_MS = 500
+QUEUE_TASK_THRESHOLD = 100
+
+# Logging configuration
+from project_planner.logging import get_logger
+project_logger = get_logger('project_planner')

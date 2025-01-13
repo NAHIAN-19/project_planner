@@ -9,10 +9,9 @@ from apps.users.serializers import (
 
 # Django imports
 from django.contrib.auth import authenticate, update_session_auth_hash
-
+from django.utils import timezone
 # Third party imports
 import logging
-
 from rest_framework import status, serializers
 from rest_framework.generics import CreateAPIView, RetrieveUpdateAPIView, GenericAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -179,9 +178,13 @@ class UserLoginView(APIView):
             return Response({
                 'error': 'Please verify your email first'
             }, status=status.HTTP_403_FORBIDDEN)
-
+        if not user.is_active:
+            return Response({
+                'error': 'Your account is inactive'
+            }, status=status.HTTP_403_FORBIDDEN)
         refresh = RefreshToken.for_user(user)
-        
+        user.last_login = timezone.now()
+        user.save()
         return Response({
             'refresh': str(refresh),
             'access': str(refresh.access_token),

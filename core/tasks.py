@@ -1,9 +1,11 @@
 from celery import shared_task
+from project_planner.logging import INFO, project_logger
 from apps.projects.models import Project, ProjectMembership
 from apps.tasks.models import Task, TaskAssignment
 from apps.notifications.utils import send_real_time_notification
 from apps.notifications.models import Notification, NotificationPreference
 from django.core.mail import send_mail
+from django.core.cache import cache
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
@@ -117,3 +119,17 @@ def check_overdue_items():
         due_date__lt=current_time,
         status__in=["not_started", "in_progress"]
     ).update(status="overdue")
+    
+@shared_task
+def update_last_seen():
+    updated_count = 0
+    for user in User.objects.all():
+        cache_key = f'user_last_seen_{user.id}'
+        last_seen = cache.get(cache_key)
+        if last_seen:
+            user.last_seen = last_seen
+            user.save(update_fields=['last_seen'])
+            cache.delete(cache_key)
+            updated_count += 1
+    
+    project_logger.log(INFO, f"Updated last_seen for {updated_count} users")
