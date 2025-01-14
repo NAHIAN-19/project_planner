@@ -1,27 +1,61 @@
 # local imports
-from apps.projects.models import Project, ProjectMembership
+from apps.projects.models import Project, ProjectMembership, ProjectInvitation
 from apps.projects.serializers import (
     ProjectSerializer, ProjectCreateSerializer, ProjectUpdateSerializer,
-    DetailedProjectMembershipSerializer, ProjectListSerializer
+    DetailedProjectMembershipSerializer, ProjectListSerializer, 
+    ProjectInvitationSerializer, ProjectInvitationAcceptSerializer
 )
 from apps.projects.filters import ProjectFilter
 from apps.notifications.utils import send_real_time_notification
+from core.permissions import IsProjectMember,IsProjectOwner
+from core.services.mail_service import EmailService
+
 # django imports
 from django.contrib.contenttypes.models import ContentType
 from django.db.models import Q
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.urls import reverse
+
 # third party imports
-from core.permissions import (
-    IsProjectMember,
-    IsProjectOwner
-)
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiExample
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
+
+class InvitationEmailMixin:
+    """
+    Mixin to handle sending invitation emails.
+    """
+    def send_invitation_email(self, request, invitation):
+        """
+        Sends an email invitation to the user for joining a project.
+        """
+        email_service = EmailService()
+
+        # Build the acceptance URL
+        accept_url = request.build_absolute_uri(
+            reverse('project-invitation-accept')
+        ) + f'?token={invitation.token}'
+
+        # Construct the email content
+        subject = f"Invitation to join project: {invitation.project.name}"
+        message_body = f"""
+        <h2 style="color: #4CAF50;">You're Invited to Join a Project!</h2>
+        <p>Dear User,</p>
+        <p>You've been invited to join the project "{invitation.project.name}" by {invitation.invited_by.get_full_name()}.</p>
+        <p>To accept this invitation, please click on the following link:</p>
+        <p><a href="{accept_url}" style="color: #4CAF50;">Accept Invitation</a></p>
+        <p>This invitation will expire on {invitation.expires_at.strftime('%Y-%m-%d %H:%M:%S')}.</p>
+        <p>If you don't have an account, you'll be able to create one when you click the link.</p>
+        """
+
+        # Send the email
+        email_service.send_custom_email(subject, message_body, invitation.email)
 
 @extend_schema_view(
     # Define schema for the `list` method
@@ -277,7 +311,15 @@ class ProjectRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
             Q(owner=user) |  # Projects owned by the user.
             Q(memberships__user=user)  # Projects where the user is a member.
         ).distinct()  # Remove duplicate projects.
-
+        
+    def get_permissions(self):
+        # Check the method type and assign the appropriate permissions.
+        if self.request.method == 'GET':
+            # For GET requests (retrieve), we check if the user is a member of the project.
+            return [permissions.IsAuthenticated(), IsProjectMember()]
+        # For PUT, PATCH, DELETE requests, only the project owner can perform these actions.
+        return [permissions.IsAuthenticated(), IsProjectOwner()]
+    
     def update(self, request, *args, **kwargs):
         # Perform a partial or full update based on the request parameters.
         partial = kwargs.pop('partial', False)
@@ -310,8 +352,8 @@ class ProjectRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
         # Ensure that only the project owner can perform updates.
         if serializer.instance.owner != self.request.user:
             raise PermissionDenied("Only the project owner can update the project.")
-        if serializer.instance.is_read_only:
-            raise PermissionDenied("This project is read-only and cannot be updated.")
+        if not serializer.instance.can_update_project():
+            raise ValidationError("This project is read-only and cannot be updated.")
         # Save the updated project instance.
         updated_project = serializer.save()
         
@@ -427,3 +469,76 @@ class ProjectMembershipView(generics.RetrieveAPIView):
                 "code": status.HTTP_404_NOT_FOUND,  # HTTP 404 status code.
                 "data": None  # No additional data to return.
             }, status=status.HTTP_404_NOT_FOUND)
+
+class ProjectInvitationListCreateView(InvitationEmailMixin, generics.ListCreateAPIView):
+    """
+    User-specific view for managing project invitations.
+    """
+    serializer_class = ProjectInvitationSerializer
+    permission_classes = [permissions.IsAuthenticated, IsProjectOwner]
+    queryset = ProjectInvitation.objects.all()
+    filter_backends = [DjangoFilterBackend, OrderingFilter, SearchFilter]
+    filterset_fields = ['accepted', 'email', 'project__id']
+    search_fields = ['email', 'project__name']
+    ordering_fields = ['created_at', 'expires_at']
+
+    def perform_create(self, serializer):
+        """
+        Create a project invitation and send the email.
+        """
+        project_members = ProjectMembership.objects.filter(project=serializer.validated_data['project'])
+        email = serializer.validated_data['email']
+        if project_members.filter(user__email=email).exists():
+            raise ValidationError("User is already a member of the project.")
+        
+        invitation = serializer.save()
+        self.send_invitation_email(self.request, invitation)
+
+    def create(self, request, *args, **kwargs):
+        """
+        Override to customize response for bulk creation.
+        """
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+class ProjectInvitationAcceptView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        # First, try to retrieve the token from the request body or URL query params
+        token = request.data.get('token') or request.query_params.get('token')
+
+        if not token:
+            return Response({"message": "Token is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Initialize the serializer with the token
+        serializer = ProjectInvitationAcceptSerializer(data={'token': token})
+        serializer.is_valid(raise_exception=True)  # This will call the validate_token method
+
+        # Retrieve invitation from the validated token
+        invitation = ProjectInvitation.objects.get(token=serializer.validated_data['token'], accepted=False)
+
+        # Handle expired invitations
+        if invitation.expires_at < timezone.now():
+            return Response({"message": "This invitation has expired."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check user authentication
+        if request.user.is_authenticated:
+            # Check if the user is already a member
+            if invitation.project.memberships.filter(user=request.user).exists():
+                return Response({"message": "You are already a member of this project."}, status=status.HTTP_200_OK)
+            
+            # Accept the invitation
+            if invitation.accept(request.user):
+                return Response({"message": "Invitation accepted successfully."}, status=status.HTTP_200_OK)
+            else:
+                return Response({"message": "Unable to accept invitation."}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            # Inform unauthenticated users to register or log in
+            return Response({
+                "message": "Please register or log in to accept the invitation.",
+                "project_name": invitation.project.name,
+                "token": invitation.token
+            }, status=status.HTTP_202_ACCEPTED)

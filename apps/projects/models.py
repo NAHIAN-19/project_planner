@@ -1,3 +1,4 @@
+import uuid
 from django.db import models
 from django.utils.timezone import now
 from django.contrib.auth import get_user_model
@@ -152,3 +153,72 @@ class ProjectMembership(models.Model):
             status='completed'
         ).count()
         self.save()
+
+
+class ProjectInvitation(models.Model):
+    """
+    Represents an invitation to join a project.
+    Stores denormalized data to improve query performance and maintain historical accuracy.
+    """
+    project = models.ForeignKey(
+        Project, 
+        on_delete=models.CASCADE, 
+        related_name='invitations'
+    )
+    email = models.EmailField()
+    token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    invited_by = models.ForeignKey(
+        User, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        related_name='sent_invitations'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    accepted = models.BooleanField(default=False)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+
+    # Denormalized fields
+    project_name = models.CharField(max_length=255)
+    inviter_email = models.EmailField()
+    inviter_name = models.CharField(max_length=255)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['token']),
+            models.Index(fields=['email']),
+            models.Index(fields=['project_name']),
+            models.Index(fields=['inviter_email']),
+        ]
+
+    def __str__(self):
+        return f"Invitation to {self.project_name} for {self.email}"
+
+    def save(self, *args, **kwargs):
+        if not self.pk:  # Only set these fields on creation
+            self.project_name = self.project.name
+            self.inviter_email = self.invited_by.email
+            self.inviter_name = self.invited_by.get_full_name() or self.invited_by.username
+        super().save(*args, **kwargs)
+
+    def is_expired(self):
+        return now() > self.expires_at
+
+    def accept(self, user):
+        if not self.is_expired() and not self.accepted:
+            self.accepted = True
+            self.accepted_at = now()
+            self.save()
+            
+            # Create ProjectMembership for the user
+            ProjectMembership.objects.create(
+                project=self.project,
+                user=user,
+                role='member'
+            )
+            
+            # Update project member count
+            self.project.update_member_count()
+            
+            return True
+        return False

@@ -1,5 +1,5 @@
 # local imports
-from apps.projects.models import Project, ProjectMembership
+from apps.projects.models import Project, ProjectMembership, ProjectInvitation
 from apps.users.serializers import CustomUserSerializer, DetailedUserSerializer
 # django imports
 from django.contrib.auth import get_user_model
@@ -7,6 +7,7 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.utils import timezone
 from django.urls import reverse
 # third-party imports
+from datetime import timedelta
 from rest_framework import serializers
 
 
@@ -197,7 +198,8 @@ class ProjectUpdateSerializer(serializers.ModelSerializer):
                 for user_id in to_add:
                     ProjectMembership.objects.create(project=instance, user_id=user_id)
                 new_members = list(to_add)
-
+            instance.update_member_count()
+            instance.refresh_from_db()  # Refresh instance to reflect changes
             # Save changes to context for potential use
             self.context['new_members'] = User.objects.filter(id__in=new_members)
             self.context['removed_members'] = User.objects.filter(id__in=removed_members)
@@ -207,3 +209,40 @@ class ProjectUpdateSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         """Use the detailed project serializer for output."""
         return ProjectSerializer(instance, context=self.context).data
+
+
+class ProjectInvitationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProjectInvitation
+        fields = ['id', 'project', 'email', 'project_name', 'inviter_email', 'inviter_name', 'created_at', 'expires_at', 'accepted', 'accepted_at']
+        read_only_fields = ['id', 'project_name', 'inviter_email', 'inviter_name', 'created_at', 'expires_at', 'accepted', 'accepted_at']
+
+    def create(self, validated_data):
+        # Check if there's an existing active invitation
+        existing_invitation = ProjectInvitation.objects.filter(
+            project=validated_data['project'],
+            email=validated_data['email'],
+            accepted=False,
+            expires_at__gt=timezone.now()
+        ).first()
+
+        if existing_invitation:
+            # If there's an active invitation, return it instead of creating a new one
+            return existing_invitation
+
+        # If no active invitation exists, create a new one
+        validated_data['invited_by'] = self.context['request'].user
+        validated_data['expires_at'] = timezone.now() + timedelta(days=7)
+        return super().create(validated_data)
+
+class ProjectInvitationAcceptSerializer(serializers.Serializer):
+    token = serializers.UUIDField()
+
+    def validate_token(self, value):
+        try:
+            invitation = ProjectInvitation.objects.get(token=value, accepted=False)
+            if invitation.is_expired():
+                raise serializers.ValidationError("This invitation has expired.")
+            return value
+        except ProjectInvitation.DoesNotExist:
+            raise serializers.ValidationError("Invalid or already accepted invitation token.")

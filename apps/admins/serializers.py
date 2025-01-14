@@ -2,11 +2,12 @@ from django.contrib.auth import get_user_model
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
 from django.utils import timezone
+from datetime import timedelta
 from rest_framework import serializers
 
 from apps.admins.models import AdminActionLog
 from apps.notifications.models import Notification
-from apps.projects.models import Project, ProjectMembership
+from apps.projects.models import Project, ProjectMembership, ProjectInvitation
 from apps.projects.serializers import (
     DetailedProjectMembershipSerializer,ProjectCreateSerializer,
     ProjectListSerializer,ProjectMembershipSerializer,
@@ -822,3 +823,93 @@ class AdminCommentCreateUpdateSerializer(serializers.ModelSerializer):
         """
         return AdminCommentDetailSerializer(instance, context=self.context).data  # Return the detailed serializer data
 
+class AdminProjectInvitationSerializer(serializers.ModelSerializer):
+    # Field to accept a list of emails for bulk invitations (write-only).
+    email = serializers.ListField(
+        child=serializers.EmailField(),
+        write_only=True
+    )
+    
+    # Optional field to specify the inviter's email.
+    inviter_email = serializers.EmailField(required=False)
+
+    class Meta:
+        model = ProjectInvitation
+        fields = ['project', 'email', 'inviter_email']
+
+    def validate(self, data):
+        """
+        Custom validation to ensure that project members who are already part of the project
+        are excluded from the invitations.
+
+        Args:
+            data: Dictionary containing 'project', 'email', and 'inviter_email'.
+
+        Returns:
+            The validated data with the list of emails filtered and existing members added.
+        """
+        project = data['project']
+        emails = data['email']
+        
+        # Get a list of existing project members' emails to exclude from the invitation list.
+        existing_members = ProjectMembership.objects.filter(
+            project=project,
+            user__email__in=emails
+        ).values_list('user__email', flat=True)
+        
+        # Filter out emails that belong to existing members.
+        if existing_members:
+            emails = [email for email in emails if email not in existing_members]
+            data['email'] = emails
+        
+        # Add the list of existing members to the validated data for later use.
+        data['existing_members'] = existing_members
+        return data
+
+    def create(self, validated_data):
+        """
+        Create project invitations for the provided email addresses, while excluding
+        existing project members. Adds the existing members to the context for use in views.
+
+        Args:
+            validated_data: Dictionary containing the validated data, 
+                            including the project,
+                            email list, and inviter's email.
+
+        Returns:
+            A list of created invitations.
+        """
+        project = validated_data['project']
+        emails = validated_data['email']
+        inviter = None
+        
+        # Retrieve the list of existing members from the validated data
+        existing_members = validated_data['existing_members']
+
+        # If an inviter email is provided, use that to find the inviter; otherwise, use the current user.
+        if 'inviter_email' in validated_data:
+            try:
+                inviter = User.objects.get(email=validated_data['inviter_email'])
+            except User.DoesNotExist:
+                # Raise an error if the inviter email does not exist.
+                raise serializers.ValidationError("Specified inviter email does not exist")
+        
+        # Default to the current authenticated user if no inviter is specified.
+        if not inviter:
+            inviter = self.context['request'].user
+            
+        # Create invitations for each email in the filtered list.
+        invitations = []
+        for email in emails:
+            invitation = ProjectInvitation.objects.create(
+                project=project,
+                email=email,
+                invited_by=inviter,
+                expires_at=timezone.now() + timedelta(days=7)  # Set expiration for 7 days.
+            )
+            invitations.append(invitation)
+        
+        # Store the existing members list in the context to send it back in the response.
+        self.context['existing_members'] = existing_members
+        
+        return invitations

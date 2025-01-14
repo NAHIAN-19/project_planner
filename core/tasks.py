@@ -4,34 +4,39 @@ from apps.projects.models import Project, ProjectMembership
 from apps.tasks.models import Task, TaskAssignment
 from apps.notifications.utils import send_real_time_notification
 from apps.notifications.models import Notification, NotificationPreference
-from django.core.mail import send_mail
+from django.core.mail import EmailMultiAlternatives
 from django.core.cache import cache
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
 from django.utils.timezone import now
+from django.utils.html import strip_tags
 from datetime import timedelta
 from django.urls import reverse
 User = get_user_model()
 
-@shared_task
-def update_project_member_count(project_id):
-    """
-    Task to update the total_member_count for a project.
-    """
-    project = Project.objects.get(id=project_id)
-    project.update_member_count()
-
 
 # Task to send emails
 @shared_task
-def send_email(subject, message, recipient):
-    send_mail(
+def send_email(subject, message, recipient, content_type="text/plain"):
+    """
+    Task to send HTML emails using Django's EmailMultiAlternatives.
+    Args:
+        subject (str): Email subject.
+        message (str): HTML content of the email.
+        recipient (str): Recipient email address.
+    """
+
+    # Create an EmailMultiAlternatives object
+    email = EmailMultiAlternatives(
         subject=subject,
-        message=message,
+        body='',  # Plain-text body
         from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[recipient],
+        to=[recipient],
     )
+    email.attach_alternative(message, content_type)
+    # Send the email
+    email.send()
 
 @shared_task
 def retry_failed_notifications(notification_id):

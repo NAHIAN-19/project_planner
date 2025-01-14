@@ -3,6 +3,8 @@ from apps.projects.views import (
     ProjectListCreateView, 
     ProjectRetrieveUpdateDestroyView,
     ProjectMembershipView,
+    ProjectInvitationListCreateView,
+    ProjectInvitationAcceptView
 )
 
 urlpatterns = [
@@ -15,4 +17,7 @@ urlpatterns = [
     
     # Endpoint for showing detail info of members of a project
     path('memberships/<int:id>/', ProjectMembershipView.as_view(), name='project-membership-detail'),
+    
+    path('invite/', ProjectInvitationListCreateView.as_view(), name='project-invitation-list-create'),
+    path('invite/accept/', ProjectInvitationAcceptView.as_view(), name='project-invitation-accept'),
 ]

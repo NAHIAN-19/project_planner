@@ -13,10 +13,11 @@ from django.db import transaction
 from django.db.models import Count, F, Q, Sum, Prefetch
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
-from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiResponse
-from rest_framework import filters, permissions, status, viewsets
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiResponse, OpenApiExample
+from rest_framework import filters, permissions, status, viewsets, generics
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework.throttling import UserRateThrottle
 
 from apps.admins.models import AdminActionLog
@@ -25,7 +26,7 @@ from apps.admins.serializers import (
     AdminCommentDetailSerializer, AdminCommentListSerializer,
     AdminPaymentHistorySerializer, AdminProjectCreateSerializer,
     AdminProjectDetailSerializer, AdminProjectListSerializer,
-    AdminProjectMembershipCreateUpdateSerializer,
+    AdminProjectMembershipCreateUpdateSerializer, AdminProjectInvitationSerializer,
     AdminProjectMembershipSerializer, AdminProjectUpdateSerializer,
     AdminSubscriptionDetailSerializer, AdminSubscriptionListSerializer,
     AdminSubscriptionPlanSerializer, AdminTaskBulkAssignSerializer,
@@ -37,7 +38,8 @@ from apps.admins.serializers import (
     NotificationAdminSerializer, AdminTaskAssignmentSerializer,
 )
 from apps.notifications.models import Notification
-from apps.projects.models import Project, ProjectMembership
+from apps.projects.models import Project, ProjectMembership, ProjectInvitation
+from apps.projects.views import InvitationEmailMixin
 from apps.subscriptions.models import Payment, Subscription, SubscriptionPlan
 from apps.tasks.models import (Comment, StatusChangeRequest, Task,
                                 TaskAssignment)
@@ -272,11 +274,16 @@ class UserAdminViewSet(AdminViewSet):
         responses={200: {'description': 'Project statuses updated successfully'}},
         description="Change the status of multiple projects in bulk. Validates status against allowed choices."
     ),
+    project_invitations=extend_schema(
+        request=AdminProjectInvitationSerializer,
+        responses={201: {'description': 'Project invitations sent successfully'}},
+        description="Send project invitations to users."
+    )
 )
-class ProjectAdminViewSet(AdminViewSet):
+class ProjectAdminViewSet(AdminViewSet, InvitationEmailMixin):
     """
     Admin ViewSet for managing projects. Supports CRUD operations,
-    bulk actions (delete and status change), filtering, searching,
+    bulk actions (delete and status change, invite), filtering, searching,
     and ordering of project records.
     """
     # Set the base queryset with optimized related object retrieval
@@ -320,6 +327,7 @@ class ProjectAdminViewSet(AdminViewSet):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
+    
     @action(detail=False, methods=['post'])
     def bulk_delete(self, request):
         """
@@ -353,6 +361,56 @@ class ProjectAdminViewSet(AdminViewSet):
         self.log_admin_action('bulk_change_project_status', None, {'project_ids': project_ids, 'new_status': new_status, 'updated_count': updated_count})
         project_logger.log(INFO, f"Admin bulk changed status for {updated_count} projects to {new_status}")
         return Response({'status': f'{updated_count} projects updated to status {new_status}'})
+    
+    @action(detail=False, methods=['post'], url_path='invite')
+    def invite_project_members(self, request):
+        """
+        Custom action to send invitations to users for a specific project.
+        This action sends invitations to a list of emails, and excludes existing members.
+        """
+        # Retrieve the project ID from the payload
+        project_id = request.data.get('project')
+        if not project_id:
+            return Response({"error": "Project ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Retrieve the project from the database using the project ID
+        try:
+            project = Project.objects.get(id=project_id)
+        except Project.DoesNotExist:
+            return Response({"error": "Project not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Initialize the serializer with the request data and project
+        serializer = AdminProjectInvitationSerializer(data=request.data, context={'request': request, 'project': project})
+        serializer.is_valid(raise_exception=True)
+
+        # Perform the creation of invitations
+        invitations = serializer.save()
+
+        # Use InvitationEmailMixin to send emails for each invitation
+        self.send_invitation_emails(invitations)
+
+        # Prepare response data
+        response_data = {
+            "message": "Invitations created successfully.",
+            "invitations": [
+                {
+                    "email": invitation.email,
+                    "expires_at": invitation.expires_at.strftime('%Y-%m-%d %H:%M:%S')
+                }
+                for invitation in invitations
+            ],
+            "existing_members": serializer.context.get('existing_members', [])
+        }
+
+        return Response(response_data, status=status.HTTP_201_CREATED)
+
+    def send_invitation_emails(self, invitations):
+        """
+        Sends invitation emails to each user in the list of invitations.
+        """
+        for invitation in invitations:
+            # Using the mixin's method to send the email
+            self.send_invitation_email(self.request, invitation)
 @extend_schema_view(
     list=extend_schema(
         description="Retrieve a list of project memberships with filtering, searching, and ordering capabilities."
@@ -481,7 +539,6 @@ class ProjectMembershipAdminViewSet(viewsets.ViewSet):
         project_logger.log(INFO, f"Admin bulk removed {removed_count} members from project: {project.id}")
 
         return Response({'status': f'{removed_count} members removed'})
-
 
 @extend_schema_view(
     list=extend_schema(description="List tasks with filtering, searching, and ordering."),
