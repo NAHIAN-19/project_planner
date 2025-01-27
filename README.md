@@ -73,7 +73,7 @@ python generate_keys.py
 ```
 Make sure to update the `.env` file with your Redis password, email settings, and Stripe keys.
 
-## Redis Setup
+## Redis Setup (Terminal - 1)
 ### On Ubuntu
 1. **Install Redis**
    ```bash
@@ -99,17 +99,17 @@ Make sure to update the `.env` file with your Redis password, email settings, an
 2. **Start Redis**: Run the Redis server executable.
 
 ## Celery Setup
-1. **Run Celery Worker**
+1. **Run Celery Worker** (Terminal - 2)
    ```bash
    celery -A project_planner worker --loglevel=info
    ```
 
-2. **Run Celery Beat**
+2. **Run Celery Beat** (Terminal - 3)
    ```bash
    celery -A project_planner beat --loglevel=info
    ```
 
-## Database Migrations
+## Database Migrations (Terminal - 4)
 1. **Create Migrations**
    ```bash
    python manage.py makemigrations
@@ -294,11 +294,10 @@ For support, please open an issue in the GitHub repository.
 ## Contributions
 Contributions are welcome! Please follow these steps:
 1. Fork the repository.
-2. Create a new branch for your feature or bug fix.
-3. Make your changes and commit them.
-4. Push your changes and create a pull request.
+2. Create a new branch for your feature or bug fix (`git checkout -b feature/YourFeature`).
+3. Make your changes and commit them (`git commit -am 'Add new feature'`).
+4. Push your changes (`git push origin feature/YourFeature`).
+5. Create a pull request.
 
 ## License
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
-

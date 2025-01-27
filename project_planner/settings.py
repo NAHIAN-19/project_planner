@@ -243,7 +243,7 @@ DEFAULT_FROM_EMAIL = os.getenv('EMAIL_HOST_USER')
 
 # Celery Configuration
 # ==================
-# if not using redis password then url = 'redis://localhost:6379/0'
+# if using redis password then url = redis://:password@localhost:6379/0
 CELERY_BROKER_URL = 'redis://localhost:6379/0'
 CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
 CELERY_ACCEPT_CONTENT = ['json']

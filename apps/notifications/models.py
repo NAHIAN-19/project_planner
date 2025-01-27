@@ -170,6 +170,11 @@ class NotificationPreference(models.Model):
         """Returns all notification preferences"""
         return self.preferences
 
+    def save(self, *args, **kwargs):
+        if not self.pk and not self.preferences:  # On creation and if preferences are empty
+            self.preferences = self.get_default_preferences()
+        super().save(*args, **kwargs)
+    
     def __str__(self):
         """String representation of the preference object"""
         return f"Notification Preferences for {self.user.username}"

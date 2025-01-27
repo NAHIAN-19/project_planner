@@ -15,4 +15,4 @@ staticfiles
 dump.rdb
 celerybeat-schedule
 logs
-
+staticfiles
